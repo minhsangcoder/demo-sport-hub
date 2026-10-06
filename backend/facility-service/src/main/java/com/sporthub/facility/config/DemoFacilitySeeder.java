@@ -23,7 +23,7 @@ public class DemoFacilitySeeder implements ApplicationRunner {
   UUID ownerId=UUID.fromString(login.path("user").path("id").asText());
   try{
    if(!facilities.findByOwnerIdOrderByCreatedAtDesc(ownerId).isEmpty())return;
-   var f=new Facility();f.setOwnerId(ownerId);f.setName("SportHub Demo Center");f.setPhone("+84901234567");f.setAddressLine("Cơ sở dữ liệu mẫu cho demo local");f.setProvince("Hà Nội");f.setDistrict("Cầu Giấy");f.setWard("Dịch Vọng");f.setTimezone("Asia/Ho_Chi_Minh");f.setStatus("ACTIVE");f.setAmenities(new LinkedHashSet<>(List.of("Bãi đỗ xe","Phòng thay đồ")));facilities.save(f);
+   var address=com.sporthub.common.dto.VietnamAdministrativeDivisions.resolve("01","00004");var f=new Facility();f.setOwnerId(ownerId);f.setName("SportHub Demo Center");f.setPhone("+84901234567");f.setAddressLine("Cơ sở dữ liệu mẫu cho demo local");f.setProvinceCode(address.provinceCode());f.setProvince(address.province());f.setWardCode(address.wardCode());f.setWard(address.ward());f.setTimezone("Asia/Ho_Chi_Minh");f.setStatus("ACTIVE");f.setAmenities(new LinkedHashSet<>(List.of("Bãi đỗ xe","Phòng thay đồ")));facilities.save(f);
    var category=categories.findAllByOrderByNameAsc().stream().filter(c->c.getName().equals("Pickleball")).findFirst().orElseThrow();
    for(int n=1;n<=2;n++){var c=new Court();c.setFacility(f);c.setSportCategoryId(category.getId());c.setCode("DEMO-"+n);c.setName("Sân Pickleball "+n);courts.save(c);}
   }finally{client.post().uri("/api/v1/auth/logout").header("Authorization","Bearer "+login.path("accessToken").asText()).retrieve().toBodilessEntity();}

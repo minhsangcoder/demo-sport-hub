@@ -102,20 +102,6 @@ services:
       start_period: 10s
     networks: [sporthub]
 
-  mailpit:
-    image: axllent/mailpit:v1.27
-    restart: unless-stopped
-    ports:
-      - "${MAILPIT_SMTP_PORT:-1025}:1025"
-      - "${MAILPIT_UI_PORT:-8025}:8025"
-    healthcheck:
-      test: ["CMD", "/mailpit", "readyz"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    networks: [sporthub]
-
   identity-service:
     profiles: [apps]
     build:
@@ -125,9 +111,18 @@ services:
     environment:
       <<: *backend-env
       IDENTITY_DB_URL: jdbc:postgresql://postgres:5432/identity_db
-      MAIL_HOST: mailpit
+      MAIL_HOST: ${MAIL_HOST:-localhost}
+      MAIL_PORT: ${MAIL_PORT:-25}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_SMTP_AUTH: ${MAIL_SMTP_AUTH:-false}
+      MAIL_SMTP_STARTTLS: ${MAIL_SMTP_STARTTLS:-false}
+      MAIL_SMTP_STARTTLS_REQUIRED: ${MAIL_SMTP_STARTTLS_REQUIRED:-false}
       DEMO_SMS_ENABLED: ${DEMO_SMS_ENABLED:-false}
       FRONTEND_BASE_URL: ${APP_PUBLIC_URL:-http://localhost:3000}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:13000/api/v1/auth/oauth2/callback/google}
       OWNER_APPLICATION_DATA_KEY: ${OWNER_APPLICATION_DATA_KEY:?Set a separate Base64 owner application data key}
     depends_on:
       postgres:
@@ -136,8 +131,7 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      mailpit:
-        condition: service_healthy
+
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://localhost:8081/actuator/health/readiness | grep -q '\"status\":\"UP\"'"]
       interval: 5s
@@ -338,7 +332,7 @@ services:
       context: ./frontend
       args:
         GATEWAY_URL: http://api-gateway:8080
-        NEXT_PUBLIC_DEMO_MAILPIT_URL: ${NEXT_PUBLIC_DEMO_MAILPIT_URL:-}
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
     ports: ["${FRONTEND_PORT:-3000}:3000"]
     depends_on:
       api-gateway:

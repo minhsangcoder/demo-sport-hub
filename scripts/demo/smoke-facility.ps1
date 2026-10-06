@@ -13,9 +13,10 @@ function Facility-Request([string]$Path,[string]$Method='Get',$Body=$null){
 }
 $facilitySmokeOwned=(Facility-Request '/owner/facilities').data
 if(!$facilitySmokeOwned){throw 'Owner demo seed not available'}
-$facilitySmokeInput=@{name='Smoke '+[Guid]::NewGuid().ToString('N');phone='+84901234567';contactEmail=' CONTACT+CRUD@EXAMPLE.TEST ';addressLine='Demo smoke address';province='Hà Nội';district='Cầu Giấy';ward='Dịch Vọng';timezone='Asia/Ho_Chi_Minh';amenities=@('Parking')}
+$facilitySmokeInput=@{name='Smoke '+[Guid]::NewGuid().ToString('N');phone='+84901234567';contactEmail=' CONTACT+CRUD@EXAMPLE.TEST ';addressLine='Demo smoke address';provinceCode='01';province='Hà Nội';wardCode='00166';ward='Cầu Giấy';timezone='Asia/Ho_Chi_Minh';amenities=@('Parking')}
 $facilitySmokeCreated=(Facility-Request '/owner/facilities' 'Post' $facilitySmokeInput).data
 if($facilitySmokeCreated.status -ne 'DRAFT'){throw 'CRUD unexpectedly bypassed approval'}
+if($facilitySmokeCreated.provinceCode -ne '01' -or $facilitySmokeCreated.province -ne 'Hà Nội' -or $facilitySmokeCreated.wardCode -ne '00166' -or $facilitySmokeCreated.ward -ne 'Cầu Giấy' -or $facilitySmokeCreated.PSObject.Properties.Name -contains 'district'){throw 'Two-level administrative address was not persisted correctly'}
 if((Facility-Request "/owner/facilities/$($facilitySmokeCreated.id)").data.contactEmail -ne 'contact+crud@example.test'){throw 'Owner create/reload contact failed'}
 $facilitySmokeInput.contactEmail='updated+crud@example.test'
 $facilitySmokeInput.name+=' Updated'
@@ -52,22 +53,24 @@ if(@((Invoke-RestMethod "$ApiBase/bookings/search?q=$([uri]::EscapeDataString($f
 . (Join-Path $PSScriptRoot 'get-demo-facility.ps1')
 $facilitySmokePublic=Get-DemoFacility $ApiBase
 $facilitySmokeOriginal=(Facility-Request "/owner/facilities/$($facilitySmokePublic.id)").data
-$facilitySmokeRestore=@{};foreach($field in @('name','phone','contactEmail','addressLine','province','district','ward','description','timezone','amenities','latitude','longitude')){$facilitySmokeRestore[$field]=$facilitySmokeOriginal.$field}
-$facilitySmokeMoved=$facilitySmokeRestore.Clone();$facilitySmokeMoved.latitude=21.0321234;$facilitySmokeMoved.longitude=105.7912345
-$facilitySmokeSearch="$ApiBase/bookings/search?q=SportHub%20Demo%20Center&date=$((Get-Date).AddDays(4).ToString('yyyy-MM-dd'))"
-$facilitySmokeBefore=(Invoke-RestMethod $facilitySmokeSearch).data.items
-if(@($facilitySmokeBefore).Count -lt 1){throw 'Controlled demo has no available courts for location verification'}
-try {
- Facility-Request "/owner/facilities/$($facilitySmokePublic.id)" 'Put' $facilitySmokeMoved | Out-Null
- $facilitySmokeAfter=(Invoke-RestMethod $facilitySmokeSearch).data.items
- if(@($facilitySmokeAfter).Count -ne @($facilitySmokeBefore).Count -or @($facilitySmokeAfter|Where-Object {$_.facility.id -ne $facilitySmokePublic.id -or $_.facility.latitude -ne $facilitySmokeMoved.latitude -or $_.facility.longitude -ne $facilitySmokeMoved.longitude}).Count){throw 'Discovery did not read the new location'}
- foreach($item in $facilitySmokeAfter){$prior=$facilitySmokeBefore|Where-Object courtId -eq $item.courtId;if($item.fromPrice -ne $prior.fromPrice -or $item.availableSlots -ne $prior.availableSlots -or $item.date -ne $prior.date){throw 'Location edit changed prices/slots/date'}}
- if(($facilitySmokeAfter|ConvertTo-Json -Depth 12) -match 'contactEmail|identityNumber|bankAccountNumber'){throw 'Discovery privacy regression'}
-} finally {
- Facility-Request "/owner/facilities/$($facilitySmokePublic.id)" 'Put' $facilitySmokeRestore | Out-Null
- $facilitySmokeRestored=(Facility-Request "/owner/facilities/$($facilitySmokePublic.id)").data
- if($facilitySmokeRestored.latitude -ne $facilitySmokeOriginal.latitude -or $facilitySmokeRestored.longitude -ne $facilitySmokeOriginal.longitude -or $facilitySmokeRestored.addressLine -ne $facilitySmokeOriginal.addressLine){throw 'Demo seed location restore failed'}
-}
+if($facilitySmokeOriginal.provinceCode -and $facilitySmokeOriginal.wardCode){
+ $facilitySmokeRestore=@{};foreach($field in @('name','phone','contactEmail','addressLine','provinceCode','province','wardCode','ward','description','timezone','amenities','latitude','longitude')){$facilitySmokeRestore[$field]=$facilitySmokeOriginal.$field}
+ $facilitySmokeMoved=$facilitySmokeRestore.Clone();$facilitySmokeMoved.latitude=21.0321234;$facilitySmokeMoved.longitude=105.7912345
+ $facilitySmokeSearch="$ApiBase/bookings/search?q=SportHub%20Demo%20Center&date=$((Get-Date).AddDays(4).ToString('yyyy-MM-dd'))"
+ $facilitySmokeBefore=(Invoke-RestMethod $facilitySmokeSearch).data.items
+ if(@($facilitySmokeBefore).Count -lt 1){throw 'Controlled demo has no available courts for location verification'}
+ try {
+  Facility-Request "/owner/facilities/$($facilitySmokePublic.id)" 'Put' $facilitySmokeMoved | Out-Null
+  $facilitySmokeAfter=(Invoke-RestMethod $facilitySmokeSearch).data.items
+  if(@($facilitySmokeAfter).Count -ne @($facilitySmokeBefore).Count -or @($facilitySmokeAfter|Where-Object {$_.facility.id -ne $facilitySmokePublic.id -or $_.facility.latitude -ne $facilitySmokeMoved.latitude -or $_.facility.longitude -ne $facilitySmokeMoved.longitude}).Count){throw 'Discovery did not read the new location'}
+  foreach($item in $facilitySmokeAfter){$prior=$facilitySmokeBefore|Where-Object courtId -eq $item.courtId;if($item.fromPrice -ne $prior.fromPrice -or $item.availableSlots -ne $prior.availableSlots -or $item.date -ne $prior.date){throw 'Location edit changed prices/slots/date'}}
+  if(($facilitySmokeAfter|ConvertTo-Json -Depth 12) -match 'contactEmail|identityNumber|bankAccountNumber'){throw 'Discovery privacy regression'}
+ } finally {
+  Facility-Request "/owner/facilities/$($facilitySmokePublic.id)" 'Put' $facilitySmokeRestore | Out-Null
+  $facilitySmokeRestored=(Facility-Request "/owner/facilities/$($facilitySmokePublic.id)").data
+  if($facilitySmokeRestored.latitude -ne $facilitySmokeOriginal.latitude -or $facilitySmokeRestored.longitude -ne $facilitySmokeOriginal.longitude -or $facilitySmokeRestored.addressLine -ne $facilitySmokeOriginal.addressLine){throw 'Demo seed location restore failed'}
+ }
+}else{Write-Output 'NOTE: legacy demo address has no current administrative codes; select province/ward again before running its public coordinate update/restore check.'}
 $facilitySmokeCategory=(Facility-Request '/sport-categories').data | Where-Object active | Select-Object -First 1
 $facilitySmokeCourtInput=@{code='SMOKE-1';name='Smoke court';sportCategoryId=$facilitySmokeCategory.id;enabled=$true}
 $facilitySmokeCourt=(Facility-Request "/owner/facilities/$($facilitySmokeCreated.id)/courts" 'Post' $facilitySmokeCourtInput).data
@@ -94,4 +97,4 @@ try {
  if($LASTEXITCODE -ne 0 -or ($facilitySmokeDirect|Out-String) -notmatch 'HTTP/\S+ 401'){throw 'Direct service did not reject spoofable identity headers'}
 } finally { Pop-Location }
 Facility-Request '/auth/logout' 'Post' @{} | Out-Null
-Write-Output 'PASS: owner facility CRUD/contact and coordinates A-B/reload/legacy PUT/pair/range/type validation/Staff 403/private publication guard/public Discovery unchanged slots+prices+date/seed restored remains DRAFT; courts/maintenance; real MinIO upload/access/replacement/durable cleanup/delete; customer scope and direct header spoofing rejected.'
+Write-Output 'PASS: owner facility CRUD/two-level administrative address/contact and coordinates A-B/reload/legacy PUT/pair/range/type validation/Staff 403/private publication guard; public Discovery unchanged slots+prices+date and seed restored when administrative codes are available; created facility remains DRAFT; courts/maintenance; real MinIO upload/access/replacement/durable cleanup/delete; customer scope and direct header spoofing rejected.'

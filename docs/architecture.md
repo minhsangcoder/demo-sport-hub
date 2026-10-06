@@ -17,7 +17,7 @@ Mỗi business service sở hữu database PostgreSQL riêng. Service không đ�
 - Redis cho cache, rate limit và coordination ngắn hạn; Redis không phải system of record.
 - MinIO cho object storage tương thích S3.
 - Môi trường local dùng image MinIO CE được build lại từ đúng upstream release và pin theo digest, do upstream hiện phân phối Community Edition dưới dạng source-only.
-- Mailpit cho email local development.
+- SMTP bên ngoài được cấu hình bằng các biến môi trường `MAIL_*`; Compose không triển khai mail catcher.
 - Docker Compose cho môi trường local.
 
 Phase hiện tại không đưa Kubernetes, Elasticsearch hoặc gRPC vào target architecture. Domain event envelope, retry, DLQ và idempotency convention được quy định trong `docs/domain-events.md`.
@@ -28,7 +28,7 @@ Phase hiện tại không đưa Kubernetes, Elasticsearch hoặc gRPC vào targe
 - Refresh token: 7 ngày.
 - Refresh token lưu trong HttpOnly cookie.
 - Access token chỉ giữ trong memory của frontend.
-- Email verification gửi vào Mailpit khi chạy local.
+- Email verification, password reset và notification cần SMTP được cấu hình.
 
 Đây là target contract, chưa phải hành vi đã hoàn chỉnh trong source hiện tại.
 

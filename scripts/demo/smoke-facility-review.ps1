@@ -9,7 +9,7 @@ $owner=Request POST '/auth/login' @{identifier='owner@sporthub.local';password=$
 if($DisableCourtId){$fixtureCourt=Request GET "/owner/courts/$DisableCourtId" $null $owner.accessToken;if($fixtureCourt.code -ne 'REVIEW-1' -or $fixtureCourt.name -ne 'Controlled review court'){throw 'Only the explicitly named review fixture can be disabled'};Request PUT "/owner/courts/$DisableCourtId" @{code=$fixtureCourt.code;name=$fixtureCourt.name;sportCategoryId=$fixtureCourt.sportCategoryId;enabled=$false} $owner.accessToken|Out-Null;Write-Output 'PASS: controlled browser review court disabled';return}
 $admin=Request POST '/auth/login' @{identifier='admin@sporthub.local';password=$demoPassword}
 $customer=Request POST '/auth/login' @{identifier='customer@sporthub.local';password=$demoPassword}
-$input=@{name='Controlled review '+[Guid]::NewGuid().ToString('N').Substring(0,8);phone='+84901111222';addressLine='Demo-only 280 Review Street';province='Hà Nội';district='Cầu Giấy';ward='Dịch Vọng';description='Controlled additional-facility runtime review';timezone='Asia/Ho_Chi_Minh';amenities=@('Bãi đỗ xe');latitude=21.028;longitude=105.78}
+$input=@{name='Controlled review '+[Guid]::NewGuid().ToString('N').Substring(0,8);phone='+84901111222';addressLine='Demo-only 280 Review Street';provinceCode='01';province='Hà Nội';wardCode='00166';ward='Cầu Giấy';description='Controlled additional-facility runtime review';timezone='Asia/Ho_Chi_Minh';amenities=@('Bãi đỗ xe');latitude=21.028;longitude=105.78}
 $facility=Request POST '/owner/facilities' $input $owner.accessToken
 $id=$facility.id
 $category=@(Request GET '/sport-categories'|Where-Object active)[0]

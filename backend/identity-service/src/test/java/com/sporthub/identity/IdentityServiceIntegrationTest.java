@@ -32,6 +32,9 @@ import static org.mockito.Mockito.reset;
 
 @SpringBootTest(properties = {
         "jwt.secret=test-only-secret-that-is-at-least-32-bytes-long",
+        "GOOGLE_CLIENT_ID=test-google-client-id",
+        "GOOGLE_CLIENT_SECRET=test-google-client-secret",
+        "GOOGLE_REDIRECT_URI=http://localhost:13000/api/v1/auth/oauth2/callback/google",
         "spring.data.redis.password=test-only",
         "spring.rabbitmq.password=test-only",
         "spring.rabbitmq.username=test-only",
@@ -198,6 +201,66 @@ class IdentityServiceIntegrationTest {
         assertThatThrownBy(() -> authService.login(new LoginRequest(email, "Password123!"), metadata))
                 .isInstanceOf(IdentityException.class)
                 .hasMessage("Account is not active");
+    }
+
+    @Test
+    void googleLoginCreatesCustomerAndIssuesSportHubJwtAndRefreshSession() {
+        String email = uniqueEmail("google-new");
+        GoogleIdentity identity = new GoogleIdentity(
+                "google-sub-" + UUID.randomUUID(), email, true, "Google Member", "https://example.com/avatar.png");
+
+        SessionTokens first = authService.loginWithGoogle(identity, metadata);
+        User user = userRepository.findByGoogleSub(identity.googleSub()).orElseThrow();
+        assertThat(user.getEmail()).isEqualTo(email);
+        assertThat(user.getProvider()).isEqualTo(AuthProvider.GOOGLE);
+        assertThat(user.getPasswordHash()).isNull();
+        assertThat(user.getStatus()).isEqualTo(AccountStatus.ACTIVE);
+        assertThat(user.isEmailVerified()).isTrue();
+        assertThat(user.getRoles()).containsExactly(Role.CUSTOMER);
+        assertThat(user.getProfile().getFullName()).isEqualTo("Google Member");
+        assertThat(user.getProfile().getAvatarUrl()).isEqualTo(identity.avatarUrl());
+        assertThat(sessionValidation.validate(jwtService.parseAccessToken(first.response().accessToken())).userId())
+                .isEqualTo(user.getId());
+        assertThat(authService.refresh(first.refreshToken(), metadata).response().user().id()).isEqualTo(user.getId());
+
+        SessionTokens repeated = authService.loginWithGoogle(identity, metadata);
+        assertThat(repeated.response().user().id()).isEqualTo(user.getId());
+        assertThat(userRepository.findAll().stream().filter(candidate -> email.equals(candidate.getEmail())).toList())
+                .hasSize(1);
+    }
+
+    @Test
+    void googleAuthorizationStartsOpenIdConnectCodeFlow() throws Exception {
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/api/v1/auth/oauth2/authorization/google"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().is3xxRedirection())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("Location", org.hamcrest.Matchers.containsString("accounts.google.com")));
+    }
+
+    @Test
+    void googleLoginSafelyLinksOnlyVerifiedExistingEmailAndRejectsUnverifiedEmail() {
+        User existing = activate(uniqueEmail("google-link"));
+        String originalPasswordHash = existing.getPasswordHash();
+        GoogleIdentity linked = new GoogleIdentity(
+                "google-sub-" + UUID.randomUUID(), existing.getEmail().toUpperCase(), true,
+                "Google Name", "https://example.com/google-avatar.png");
+
+        SessionTokens session = authService.loginWithGoogle(linked, metadata);
+        User current = userRepository.findById(existing.getId()).orElseThrow();
+        assertThat(current.getProvider()).isEqualTo(AuthProvider.GOOGLE);
+        assertThat(current.getGoogleSub()).isEqualTo(linked.googleSub());
+        assertThat(current.getPasswordHash()).isEqualTo(originalPasswordHash);
+        assertThat(session.response().user().id()).isEqualTo(existing.getId());
+        assertThat(authService.login(new LoginRequest(existing.getEmail(), "Password123!"), metadata)
+                .response().user().id()).isEqualTo(existing.getId());
+
+        String unverifiedEmail = uniqueEmail("google-unverified");
+        authService.register(registration(unverifiedEmail, null), metadata);
+        assertThatThrownBy(() -> authService.loginWithGoogle(
+                new GoogleIdentity("google-sub-" + UUID.randomUUID(), unverifiedEmail, true, "Member", null), metadata))
+                .isInstanceOf(IdentityException.class)
+                .hasMessage("Verify this email address before linking a Google account");
     }
 
     @Test
@@ -529,13 +592,25 @@ class IdentityServiceIntegrationTest {
 
     private com.sporthub.identity.security.AuthenticatedUser applicant(User user){return new com.sporthub.identity.security.AuthenticatedUser(user.getId(),user.getEmail(),java.util.Set.copyOf(user.getRoles()),UUID.randomUUID());}
     private com.sporthub.identity.security.AuthenticatedUser applicationAdmin(){var u=activate(uniqueEmail("application-admin"));u.getRoles().add(Role.ADMIN);userRepository.saveAndFlush(u);return applicant(u);}
-    private OwnerApplicationDtos.Create applicationInput(){return new OwnerApplicationDtos.Create(applicationLegal(),new OwnerApplicationDtos.Facility("First facility","+84901234567","Demo address","Ha Noi","Cau Giay","Demo ward",null,"Asia/Ho_Chi_Minh",new java.math.BigDecimal("21.03"),new java.math.BigDecimal("105.78"),java.util.Set.of()));}
+    private OwnerApplicationDtos.Create applicationInput(){return new OwnerApplicationDtos.Create(applicationLegal(),new OwnerApplicationDtos.Facility("First facility","+84901234567","Demo address","01","Hà Nội","00004","Ba Đình",null,"Asia/Ho_Chi_Minh",new java.math.BigDecimal("21.03"),new java.math.BigDecimal("105.78"),java.util.Set.of()));}
+    @Test void administrativeAddressIsValidatedBeforeAccountOrApplicationWrites(){
+        var request=signupRequest(uniqueEmail("signup-admin-address"));var payload=request.ownerApplication().deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)payload.path("facility")).put("provinceCode","79");
+        assertThatThrownBy(()->signup(new RegisterRequest(request.fullName(),request.email(),null,request.password(),true,payload),UUID.randomUUID().toString())).isInstanceOf(IdentityException.class);assertThat(userRepository.findByEmailIgnoreCase(request.email())).isEmpty();org.mockito.Mockito.verifyNoInteractions(applicationDependencies);
+        var user=activate(uniqueEmail("application-admin-address"));var actor=applicant(user);var f=applicationInput().facility();
+        for(var pair:java.util.List.of(new String[]{"99","00004"},new String[]{"79","00004"},new String[]{"01","99999"})){
+            var invalid=new OwnerApplicationDtos.Create(applicationLegal(),new OwnerApplicationDtos.Facility(f.name(),f.phone(),f.addressLine(),pair[0],f.province(),pair[1],f.ward(),f.description(),f.timezone(),f.latitude(),f.longitude(),f.amenities()));
+            assertThatThrownBy(()->applications.create(invalid,actor)).isInstanceOf(IdentityException.class);
+        }
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM owner_applications WHERE user_id=?",Integer.class,user.getId())).isZero();
+        var untrusted=new OwnerApplicationDtos.Create(applicationLegal(),new OwnerApplicationDtos.Facility(f.name(),f.phone(),f.addressLine(),"01","Arbitrary province","00004","Arbitrary ward",f.description(),f.timezone(),f.latitude(),f.longitude(),f.amenities()));
+        var saved=applications.create(untrusted,actor);assertThat(jdbc.queryForObject("SELECT initial_facility->>'province' FROM owner_applications WHERE id=?",String.class,saved.id())).isEqualTo("Hà Nội");assertThat(jdbc.queryForObject("SELECT initial_facility->>'ward' FROM owner_applications WHERE id=?",String.class,saved.id())).isEqualTo("Ba Đình");
+    }
     private OwnerApplicationDtos.Legal applicationLegal(){return new OwnerApplicationDtos.Legal("Demo representative","TEST-IDENTITY-PRIVATE","Demo business",null,null,"Demo bank","Demo representative","TEST-BANK-PRIVATE");}
     private OwnerApplicationDtos.Decision approval(){return new OwnerApplicationDtos.Decision("APPROVE","Application reviewed and accepted",new java.math.BigDecimal("5.00"));}
 
 
     private OwnerApplicationDtos.Create contactApplicationInput(String email){
-        var f=applicationInput().facility();return new OwnerApplicationDtos.Create(applicationLegal(),new OwnerApplicationDtos.Facility(f.name(),f.phone(),f.addressLine(),f.province(),f.district(),f.ward(),f.description(),f.timezone(),f.latitude(),f.longitude(),f.amenities(),email));
+        var f=applicationInput().facility();return new OwnerApplicationDtos.Create(applicationLegal(),new OwnerApplicationDtos.Facility(f.name(),f.phone(),f.addressLine(),f.provinceCode(),f.province(),f.wardCode(),f.ward(),f.description(),f.timezone(),f.latitude(),f.longitude(),f.amenities(),email));
     }
     private void mockContactSnapshot(UUID id,String email) throws Exception {
         var mapper=new com.fasterxml.jackson.databind.ObjectMapper();var snapshot=mapper.createObjectNode();snapshot.putObject("facility").put("name","First facility").put("contactEmail",email);

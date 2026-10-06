@@ -11,7 +11,6 @@ type Channel = 'EMAIL' | 'PHONE'
 type Challenge = { id: string; channel: Channel; recipient: string; expiresAt: string; resendAfter: string; usable: boolean }
 const channels: Channel[] = ['EMAIL', 'PHONE']
 const labels = { EMAIL: 'Email', PHONE: 'Số điện thoại' }
-const mailpit = process.env.NEXT_PUBLIC_DEMO_MAILPIT_URL
 
 export default function ContactPage() {
   const { user, ready } = useAuth()
@@ -106,6 +105,5 @@ export default function ContactPage() {
         </div>}
       </section>
     })}
-    {mailpit && <a href={mailpit} target="_blank" rel="noreferrer" className="mt-6 inline-block text-sm text-emerald-700 hover:underline">Mở hộp thư demo để xem email và SMS demo</a>}
   </main></RequireAuth>
 }

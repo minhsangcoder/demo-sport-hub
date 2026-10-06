@@ -3,8 +3,9 @@ export type DiscoveryResult = {
     id: string
     name: string
     addressLine: string
+    provinceCode: string | null
     province: string
-    district: string
+    wardCode: string | null
     ward: string
     timezone: string
     amenities: string[]

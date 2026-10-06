@@ -10,7 +10,10 @@ public class Facility {
  private String name; private String phone;
  @Column(name="contact_email",length=254) private String contactEmail;
  @Column(name="address_line") private String addressLine;
- private String province; private String district; private String ward;
+ @Column(name="province_code",length=2) private String provinceCode;
+ private String province;
+ @Column(name="ward_code",length=5) private String wardCode;
+ private String ward;
  @Column(columnDefinition="text") private String description;
  private String timezone; private java.math.BigDecimal latitude; private java.math.BigDecimal longitude;
  private String status="DRAFT";

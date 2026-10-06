@@ -10,9 +10,9 @@ import java.util.*;
 
 @Service
 public class DiscoveryService {
-    public record Criteria(String q,String province,String district,UUID sportCategoryId,String date,String opensAfter,String closesBefore,
+    public record Criteria(String q,String provinceCode,UUID sportCategoryId,String date,String opensAfter,String closesBefore,
                            BigDecimal minPrice,BigDecimal maxPrice,Double latitude,Double longitude,Double radiusKm,String sort) {}
-    public record FacilitySummary(UUID id,String name,String addressLine,String province,String district,String ward,String timezone,
+    public record FacilitySummary(UUID id,String name,String addressLine,String provinceCode,String province,String wardCode,String ward,String timezone,
                                   Double latitude,Double longitude,List<String> amenities) {}
     public record Result(FacilitySummary facility,UUID courtId,String courtName,UUID sportCategoryId,String sportName,String date,
                          BigDecimal fromPrice,String currency,int availableSlots,Instant firstStartsAt,Instant firstEndsAt,Double distanceKm) {}
@@ -20,7 +20,7 @@ public class DiscoveryService {
     private final DiscoveryDependencies dependencies;private final BookingService bookings;private final Clock clock;private final int advanceDays;
     public DiscoveryService(DiscoveryDependencies dependencies,BookingService bookings,Clock clock,@org.springframework.beans.factory.annotation.Value("${booking.advance-days:90}") int advanceDays){this.dependencies=dependencies;this.bookings=bookings;this.clock=clock;this.advanceDays=advanceDays;}
     public SearchResult search(Criteria input){
-        text(input.q());text(input.province());text(input.district());
+        text(input.q());
         var today=clock.instant().atZone(ZoneId.of("Asia/Ho_Chi_Minh")).toLocalDate();
         LocalDate day;LocalTime after,before;
         try {day=input.date()==null?today:LocalDate.parse(input.date());after=input.opensAfter()==null?null:LocalTime.parse(input.opensAfter());before=input.closesBefore()==null?null:LocalTime.parse(input.closesBefore());}
@@ -34,13 +34,13 @@ public class DiscoveryService {
         var results=new ArrayList<Result>();boolean truncated=false;int scanned=0;
         try{
             var names=new HashMap<UUID,String>();for(var category:dependencies.categories())if(category.path("active").asBoolean())names.put(UUID.fromString(category.path("id").asText()),category.path("name").asText());
-            var facilities=dependencies.facilities(input.q(),input.province(),input.district(),input.sportCategoryId());truncated=facilities.size()>=200;
+            var facilities=dependencies.facilities(input.q(),input.provinceCode(),input.sportCategoryId());truncated=facilities.size()>=200;
             outer:for(var f:facilities){
                 Double lat=f.path("latitude").isNumber()?f.path("latitude").doubleValue():null,lon=f.path("longitude").isNumber()?f.path("longitude").doubleValue():null;
                 Double distance=origin&&lat!=null&&lon!=null?distance(input.latitude(),input.longitude(),lat,lon):null;
                 if(input.radiusKm()!=null&&(distance==null||distance>input.radiusKm()))continue;
                 UUID facilityId=UUID.fromString(f.path("id").asText());var amenities=new ArrayList<String>();f.path("amenities").forEach(a->amenities.add(a.asText()));
-                var summary=new FacilitySummary(facilityId,f.path("name").asText(),f.path("addressLine").asText(),f.path("province").asText(),f.path("district").asText(),f.path("ward").asText(),f.path("timezone").asText(),lat,lon,amenities);
+                var summary=new FacilitySummary(facilityId,f.path("name").asText(),f.path("addressLine").asText(),f.path("provinceCode").asText(null),f.path("province").asText(),f.path("wardCode").asText(null),f.path("ward").asText(),f.path("timezone").asText(),lat,lon,amenities);
                 for(var court:dependencies.courts(facilityId)){
                     UUID category=UUID.fromString(court.path("sportCategoryId").asText());if(!court.path("enabled").asBoolean()||!names.containsKey(category)||input.sportCategoryId()!=null&&!input.sportCategoryId().equals(category))continue;
                     if(scanned++>=200){truncated=true;break outer;}

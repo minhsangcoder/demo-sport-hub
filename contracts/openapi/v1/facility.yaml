@@ -1255,20 +1255,16 @@
             }
           },
           {
-            "name": "province",
+            "name": "provinceCode",
             "in": "query",
             "schema": {
               "type": "string",
-              "maxLength": 180
-            }
-          },
-          {
-            "name": "district",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 180
-            }
+              "minLength": 2,
+              "maxLength": 2,
+              "pattern": "^[0-9]{2}$",
+              "description": "Current Vietnam province/city code from Open Admin Data. Keep leading zeroes."
+            },
+            "description": "Filter by the selected current province/city code, rather than free-form display text."
           },
           {
             "name": "sportCategoryId",
@@ -3332,22 +3328,34 @@
           "addressLine": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 500
+            "maxLength": 500,
+            "description": "House number, street and additional address details only; administrative units are stored separately."
+          },
+          "provinceCode": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 2,
+            "pattern": "^[0-9]{2}$",
+            "description": "Current Vietnam province/city code from Open Admin Data. Keep leading zeroes."
           },
           "province": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 100
+            "maxLength": 100,
+            "description": "Canonical current province/city display name. The backend derives the stored display name from its code."
           },
-          "district": {
+          "wardCode": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 100
+            "minLength": 5,
+            "maxLength": 5,
+            "pattern": "^[0-9]{5}$",
+            "description": "Current Vietnam commune/ward code from Open Admin Data. Must belong to provinceCode; keep leading zeroes."
           },
           "ward": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 100
+            "maxLength": 100,
+            "description": "Canonical current commune/ward display name. The backend derives the stored display name from its code."
           },
           "description": {
             "type": "string",
@@ -3400,13 +3408,14 @@
           "name",
           "phone",
           "addressLine",
+          "provinceCode",
           "province",
-          "district",
+          "wardCode",
           "ward",
           "timezone"
         ],
         "additionalProperties": false,
-        "description": "Location is a paired optional value. On PUT, omitting both latitude and longitude preserves the stored location; supply both numeric values to replace it, or both null to clear it (existing nullable location semantics). One missing/null coordinate is invalid. Values use existing NUMERIC(10,7) storage precision. Address text is independent of map coordinates. Backend ownership/applicant and publication guards apply; STAFF alone grants no edit access."
+        "description": "Location is a paired optional value. On PUT, omitting both latitude and longitude preserves the stored location; supply both numeric values to replace it, or both null to clear it (existing nullable location semantics). One missing/null coordinate is invalid. Values use existing NUMERIC(10,7) storage precision. Address text is independent of map coordinates. Backend ownership/applicant and publication guards apply; STAFF alone grants no edit access. Vietnam addresses use province/city and commune/ward only. The backend validates codes and their relationship against the current Open Admin Data dataset and stores the canonical display names; selecting another province requires a new ward selection."
       },
       "FacilityView": {
         "type": "object",
@@ -3424,22 +3433,40 @@
           "addressLine": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 500
+            "maxLength": 500,
+            "description": "House number, street and additional address details only; administrative units are stored separately."
+          },
+          "provinceCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 2,
+            "maxLength": 2,
+            "pattern": "^[0-9]{2}$",
+            "description": "Current Vietnam province/city code from Open Admin Data. Keep leading zeroes. Null on an unmapped legacy address until its administrative units are selected again."
           },
           "province": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 100
+            "maxLength": 100,
+            "description": "Canonical current province/city display name."
           },
-          "district": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 100
+          "wardCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 5,
+            "maxLength": 5,
+            "pattern": "^[0-9]{5}$",
+            "description": "Current Vietnam commune/ward code from Open Admin Data. Must belong to provinceCode; keep leading zeroes. Null on an unmapped legacy address until its administrative units are selected again."
           },
           "ward": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 100
+            "maxLength": 100,
+            "description": "Canonical current commune/ward display name."
           },
           "description": {
             "type": "string",
@@ -3505,8 +3532,9 @@
           "name",
           "phone",
           "addressLine",
+          "provinceCode",
           "province",
-          "district",
+          "wardCode",
           "ward",
           "timezone",
           "status",
@@ -3978,10 +4006,10 @@
       },
       "FacilitySnapshot": {
         "type": "object",
-        "description": "Immutable submitted configuration. Legacy facility snapshots may lack contactEmail; never backfilled from operational/account data.",
+        "description": "Immutable submitted configuration. Legacy facility snapshots may lack current administrative codes or contactEmail; never backfilled from operational/account data.",
         "properties": {
           "facility": {
-            "$ref": "#/components/schemas/FacilityProfileView"
+            "$ref": "#/components/schemas/SubmittedFacilityProfileView"
           },
           "courts": {
             "type": "array",
@@ -4014,6 +4042,76 @@
             }
           }
         }
+      },
+      "SubmittedFacilityProfileView": {
+        "type": "object",
+        "description": "Immutable submitted facility profile. Current submissions store administrative codes and canonical display names. Legacy submissions retain their original address data and may omit administrative codes or contactEmail; never backfilled from the operational profile.",
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/FacilityView/properties/name"
+          },
+          "phone": {
+            "$ref": "#/components/schemas/FacilityView/properties/phone"
+          },
+          "addressLine": {
+            "$ref": "#/components/schemas/FacilityView/properties/addressLine"
+          },
+          "provinceCode": {
+            "$ref": "#/components/schemas/FacilityView/properties/provinceCode"
+          },
+          "province": {
+            "$ref": "#/components/schemas/FacilityView/properties/province"
+          },
+          "wardCode": {
+            "$ref": "#/components/schemas/FacilityView/properties/wardCode"
+          },
+          "ward": {
+            "$ref": "#/components/schemas/FacilityView/properties/ward"
+          },
+          "description": {
+            "$ref": "#/components/schemas/FacilityView/properties/description"
+          },
+          "timezone": {
+            "$ref": "#/components/schemas/FacilityView/properties/timezone"
+          },
+          "latitude": {
+            "$ref": "#/components/schemas/FacilityView/properties/latitude"
+          },
+          "longitude": {
+            "$ref": "#/components/schemas/FacilityView/properties/longitude"
+          },
+          "amenities": {
+            "$ref": "#/components/schemas/FacilityView/properties/amenities"
+          },
+          "id": {
+            "$ref": "#/components/schemas/FacilityView/properties/id"
+          },
+          "ownerId": {
+            "$ref": "#/components/schemas/FacilityView/properties/ownerId"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FacilityView/properties/status"
+          },
+          "version": {
+            "$ref": "#/components/schemas/FacilityView/properties/version"
+          },
+          "contactEmail": {
+            "$ref": "#/components/schemas/FacilityProfileView/allOf/1/properties/contactEmail"
+          }
+        },
+        "required": [
+          "id",
+          "ownerId",
+          "name",
+          "phone",
+          "addressLine",
+          "province",
+          "ward",
+          "timezone",
+          "status",
+          "amenities",
+          "version"
+        ]
       }
     }
   }

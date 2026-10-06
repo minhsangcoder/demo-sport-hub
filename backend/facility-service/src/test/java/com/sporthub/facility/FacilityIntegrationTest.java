@@ -78,7 +78,20 @@ class FacilityIntegrationTest {
   assertThat(reviews.reviews(facility).getFirst().snapshot().path("facility").path("latitude").decimalValue()).isEqualByComparingTo("21");
   assertThat(jdbc.queryForObject("SELECT count(*) FROM facility_audit WHERE facility_id=? AND action='ADMIN_FACILITY_APPROVE'",Integer.class,facility)).isEqualTo(1);
  }
- private FacilityInput input(String name){return new FacilityInput(name,"+84901234567","Address","Province","District","Ward","Description","Asia/Ho_Chi_Minh",null,null,Set.of("Parking"));}
+ private FacilityInput input(String name){return new FacilityInput(name,"+84901234567","Address","01","Hà Nội","00004","Ba Đình","Description","Asia/Ho_Chi_Minh",null,null,Set.of("Parking"));}
+
+ @Test void administrativeAddressValidatesHierarchyAndPersistsCanonicalNames()throws Exception{
+  var actor=owner();var original=input("Canonical address");
+  var untrusted=new FacilityInput(original.name(),original.phone(),"123 Example street","01","Arbitrary province","00004","Arbitrary ward",original.description(),original.timezone(),null,null,original.amenities());
+  var saved=service.create(untrusted,actor);assertThat(saved.provinceCode()).isEqualTo("01");assertThat(saved.province()).isEqualTo("Hà Nội");assertThat(saved.wardCode()).isEqualTo("00004");assertThat(saved.ward()).isEqualTo("Ba Đình");assertThat(saved.addressLine()).isEqualTo("123 Example street");
+  org.mockito.Mockito.when(identity.current(org.mockito.ArgumentMatchers.any())).thenReturn(actor);
+  for(var pair:List.of(new String[]{"99","00004"},new String[]{"79","00004"},new String[]{"01","99999"},new String[]{"01","00001"})){
+   var body=(com.fasterxml.jackson.databind.node.ObjectNode)json.valueToTree(original);body.put("provinceCode",pair[0]);body.put("wardCode",pair[1]);
+   http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/v1/owner/facilities/"+saved.id()).contentType("application/json").content(body.toString())).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
+   assertThatThrownBy(()->service.create(json.treeToValue(body,FacilityInput.class),actor)).isInstanceOf(IllegalArgumentException.class);
+  }
+  assertThat(service.ownedDetail(saved.id(),actor).addressLine()).isEqualTo("123 Example street");assertThat(service.ownedDetail(saved.id(),actor).provinceCode()).isEqualTo("01");assertThat(service.owned(actor)).hasSize(1);
+ }
 
  @Test void facilityReviewFreezesSubmissionSupportsSupplementAndPublishesExactlyOneDecision(){
   var owner=owner();var admin=new Caller(UUID.randomUUID(),"Admin",Set.of("ADMIN"),Map.of());var f=service.create(emailInput("Review "+UUID.randomUUID(),"old@example.test"),owner);
@@ -132,11 +145,11 @@ class FacilityIntegrationTest {
  @Test void publicSearchCombinesFiltersAndExcludesDraftDisabledAndInactiveSports(){
   var owner=owner();var admin=new Caller(UUID.randomUUID(),"Admin",Set.of("ADMIN"),Map.of());var sport=service.createCategory(new CategoryInput("Search sport "+UUID.randomUUID(),true),admin);String name="Search "+UUID.randomUUID();var f=service.create(input(name),owner);
   var court=service.createCourt(f.id(),new CourtInput("SEARCH","Search court",sport.id(),null,true),owner);
-  assertThat(service.search(name,null,null,sport.id())).isEmpty();jdbc.update("UPDATE facilities SET status='ACTIVE' WHERE id=?",f.id());
-  assertThat(service.search(name,"Province","District",sport.id())).extracting(FacilityView::id).containsExactly(f.id());
-  assertThat(service.search(name,"Other Province",null,sport.id())).isEmpty();assertThat(service.search(name,null,"Other District",sport.id())).isEmpty();assertThat(service.search("%",null,null,null)).isEmpty();
-  service.updateCourt(court.id(),new CourtInput("SEARCH","Search court",sport.id(),null,false),owner);assertThat(service.search(name,null,null,sport.id())).isEmpty();
-  service.updateCourt(court.id(),new CourtInput("SEARCH","Search court",sport.id(),null,true),owner);jdbc.update("UPDATE sport_categories SET active=false WHERE id=?",sport.id());assertThat(service.search(name,null,null,sport.id())).isEmpty();
+  assertThat(service.search(name,null,sport.id())).isEmpty();jdbc.update("UPDATE facilities SET status='ACTIVE' WHERE id=?",f.id());
+  assertThat(service.search(name,"01",sport.id())).extracting(FacilityView::id).containsExactly(f.id());
+  assertThat(service.search(name,"99",sport.id())).isEmpty();assertThat(service.search("%",null,null)).isEmpty();
+  service.updateCourt(court.id(),new CourtInput("SEARCH","Search court",sport.id(),null,false),owner);assertThat(service.search(name,null,sport.id())).isEmpty();
+  service.updateCourt(court.id(),new CourtInput("SEARCH","Search court",sport.id(),null,true),owner);jdbc.update("UPDATE sport_categories SET active=false WHERE id=?",sport.id());assertThat(service.search(name,null,sport.id())).isEmpty();
  }
  @Test void courtUniquenessMaintenanceAndImageValidationArePersistent(){
   var owner=owner();var facility=service.create(input("Courts "+UUID.randomUUID()),owner);
@@ -155,13 +168,13 @@ class FacilityIntegrationTest {
     .isInstanceOf(IllegalArgumentException.class);
  }
  @Test void invalidTimezoneAndRoleAreRejected(){
-  var bad=new FacilityInput("Bad","phone","address","p","d","w",null,"invalid/timezone",null,null,Set.of());
+  var bad=new FacilityInput("Bad","phone","address","01","Hà Nội","00004","Ba Đình",null,"invalid/timezone",null,null,Set.of());
   assertThatThrownBy(()->service.create(bad,owner())).isInstanceOf(IllegalArgumentException.class);
   assertThatThrownBy(()->service.create(input("Denied"),new Caller(UUID.randomUUID(),"Customer",Set.of("CUSTOMER"),Map.of())))
     .isInstanceOf(ForbiddenException.class);
  }
 
- private FacilityInput emailInput(String name,String email){return new FacilityInput(name,"+84901234567","Address","Province","District","Ward","Description","Asia/Ho_Chi_Minh",null,null,Set.of("Parking"),email);}
+ private FacilityInput emailInput(String name,String email){return new FacilityInput(name,"+84901234567","Address","01","Hà Nội","00004","Ba Đình","Description","Asia/Ho_Chi_Minh",null,null,Set.of("Parking"),email);}
  @Test void contactEmailCreateUpdateNormalizeClearAndLegacyPutPreserveContact() throws Exception {
   var owner=owner();var f=service.create(emailInput("Contact "+UUID.randomUUID(),"  Local+Contact@EXAMPLE.TEST  "),owner);
   assertThat(f.contactEmail()).isEqualTo("local+contact@example.test");assertThat(service.ownedDetail(f.id(),owner).contactEmail()).isEqualTo(f.contactEmail());
@@ -203,7 +216,7 @@ class FacilityIntegrationTest {
   assertThat(json.writeValueAsString(service.ownedDetail(f.id(),owner))).contains("contactEmail","hidden@example.test");
  }
 
- private FacilityInput locationInput(String name,String latitude,String longitude){return new FacilityInput(name,"+84901234567","Address","Province","District","Ward","Description","Asia/Ho_Chi_Minh",latitude==null?null:new java.math.BigDecimal(latitude),longitude==null?null:new java.math.BigDecimal(longitude),Set.of("Parking"),"private@example.test");}
+ private FacilityInput locationInput(String name,String latitude,String longitude){return new FacilityInput(name,"+84901234567","Address","01","Hà Nội","00004","Ba Đình","Description","Asia/Ho_Chi_Minh",latitude==null?null:new java.math.BigDecimal(latitude),longitude==null?null:new java.math.BigDecimal(longitude),Set.of("Parking"),"private@example.test");}
  @Test void locationUpdateReloadPreservesOmittedPairAndUsesExistingStoragePrecision() throws Exception {
   var actor=owner();var f=service.create(locationInput("Location","21.028","105.78"),actor);
   var saved=service.update(f.id(),locationInput("Location edited","21.032123456","105.791234567"),actor);

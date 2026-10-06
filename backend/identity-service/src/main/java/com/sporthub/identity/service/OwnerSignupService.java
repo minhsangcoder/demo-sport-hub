@@ -31,6 +31,7 @@ public class OwnerSignupService {
    if(owner==null)throw invalid("Supply valid Owner information and first facility");
    var violations=validator.validate(owner);
    if(!violations.isEmpty())throw new com.sporthub.identity.exception.OwnerSignupInputException("Supply valid Owner information and first facility",violations.stream().map(v->com.sporthub.common.dto.FieldError.builder().field("ownerApplication."+v.getPropertyPath()).code("Invalid").message(v.getMessage()).build()).toList());
+   com.sporthub.common.dto.VietnamAdministrativeDivisions.resolve(owner.facility().provinceCode(),owner.facility().wardCode());
    setup=json.treeToValue(request.ownerApplication().path("setup"),OwnerSignupSetup.class);setup.validate();
   }catch(IdentityException ex){throw ex;}catch(Exception ex){throw invalid("Invalid Owner/facility/operating information");}
   checkFile("identityDocument",identity,false);checkFile("locationDocument",location,false);checkFile("facilityImage",image,true);

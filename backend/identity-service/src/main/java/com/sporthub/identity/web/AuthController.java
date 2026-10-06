@@ -33,7 +33,7 @@ public class AuthController {
     public ResponseEntity<ApiResponse<RegisterResult>> register(
             @Valid @RequestBody RegisterRequest body, HttpServletRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.created("Account created; check Mailpit for the verification email",
+                .body(ApiResponse.created("Account created; check your email for the verification message",
                         authService.register(body, RequestMetadata.from(request))));
     }
 

@@ -1458,20 +1458,16 @@
             }
           },
           {
-            "name": "province",
+            "name": "provinceCode",
             "in": "query",
             "schema": {
               "type": "string",
-              "maxLength": 180
-            }
-          },
-          {
-            "name": "district",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 180
-            }
+              "minLength": 2,
+              "maxLength": 2,
+              "pattern": "^[0-9]{2}$",
+              "description": "Current Vietnam province/city code from Open Admin Data. Keep leading zeroes."
+            },
+            "description": "Filter by the selected current province/city code, rather than free-form display text."
           },
           {
             "name": "sportCategoryId",
@@ -2404,8 +2400,9 @@
           "id",
           "name",
           "addressLine",
+          "provinceCode",
           "province",
-          "district",
+          "wardCode",
           "ward",
           "timezone",
           "latitude",
@@ -2421,16 +2418,32 @@
             "type": "string"
           },
           "addressLine": {
-            "type": "string"
+            "type": "string",
+            "description": "House number, street and additional address details only; administrative units are stored separately."
+          },
+          "provinceCode": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 2,
+            "pattern": "^[0-9]{2}$",
+            "description": "Current Vietnam province/city code from Open Admin Data. Keep leading zeroes. Null on an unmapped legacy address until its administrative units are selected again.",
+            "nullable": true
           },
           "province": {
-            "type": "string"
+            "type": "string",
+            "description": "Canonical current province/city display name."
           },
-          "district": {
-            "type": "string"
+          "wardCode": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 5,
+            "pattern": "^[0-9]{5}$",
+            "description": "Current Vietnam commune/ward code from Open Admin Data. Must belong to provinceCode; keep leading zeroes. Null on an unmapped legacy address until its administrative units are selected again.",
+            "nullable": true
           },
           "ward": {
-            "type": "string"
+            "type": "string",
+            "description": "Canonical current commune/ward display name."
           },
           "timezone": {
             "type": "string"

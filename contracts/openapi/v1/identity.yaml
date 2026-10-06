@@ -2161,31 +2161,44 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "provinceCode",
           "province",
-          "district",
+          "wardCode",
           "ward",
           "addressLine"
         ],
         "properties": {
+          "provinceCode": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 2,
+            "pattern": "^[0-9]{2}$",
+            "description": "Current Vietnam province/city code from Open Admin Data. Keep leading zeroes."
+          },
           "province": {
             "type": "string",
             "minLength": 2,
-            "maxLength": 120
+            "maxLength": 120,
+            "description": "Canonical current province/city display name. The backend derives the stored display name from its code."
           },
-          "district": {
+          "wardCode": {
             "type": "string",
-            "minLength": 2,
-            "maxLength": 120
+            "minLength": 5,
+            "maxLength": 5,
+            "pattern": "^[0-9]{5}$",
+            "description": "Current Vietnam commune/ward code from Open Admin Data. Must belong to provinceCode; keep leading zeroes."
           },
           "ward": {
             "type": "string",
             "minLength": 2,
-            "maxLength": 120
+            "maxLength": 120,
+            "description": "Canonical current commune/ward display name. The backend derives the stored display name from its code."
           },
           "addressLine": {
             "type": "string",
             "minLength": 3,
-            "maxLength": 500
+            "maxLength": 500,
+            "description": "House number, street and additional address details only; administrative units are stored separately."
           },
           "latitude": {
             "type": "number",
@@ -2938,19 +2951,32 @@
           },
           "addressLine": {
             "type": "string",
-            "maxLength": 500
+            "maxLength": 500,
+            "description": "House number, street and additional address details only; administrative units are stored separately."
+          },
+          "provinceCode": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 2,
+            "pattern": "^[0-9]{2}$",
+            "description": "Current Vietnam province/city code from Open Admin Data. Keep leading zeroes."
           },
           "province": {
             "type": "string",
-            "maxLength": 100
+            "maxLength": 100,
+            "description": "Canonical current province/city display name. The backend derives the stored display name from its code."
           },
-          "district": {
+          "wardCode": {
             "type": "string",
-            "maxLength": 100
+            "minLength": 5,
+            "maxLength": 5,
+            "pattern": "^[0-9]{5}$",
+            "description": "Current Vietnam commune/ward code from Open Admin Data. Must belong to provinceCode; keep leading zeroes."
           },
           "ward": {
             "type": "string",
-            "maxLength": 100
+            "maxLength": 100,
+            "description": "Canonical current commune/ward display name. The backend derives the stored display name from its code."
           },
           "description": {
             "type": [
@@ -2995,13 +3021,15 @@
           "name",
           "phone",
           "addressLine",
+          "provinceCode",
           "province",
-          "district",
+          "wardCode",
           "ward",
           "timezone",
           "latitude",
           "longitude"
-        ]
+        ],
+        "description": "The province/city and commune/ward must be selected from the current Open Admin Data Vietnam dataset. The backend validates the code relationship and stores canonical display names derived from those codes."
       },
       "OwnerApplicationFacilityDetail": {
         "type": "object",

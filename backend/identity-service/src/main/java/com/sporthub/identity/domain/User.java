@@ -20,7 +20,9 @@ public class User {
     @Id @GeneratedValue @UuidGenerator private UUID id;
     @Column(length = 255) private String email;
     @Column(length = 20) private String phone;
-    @Column(name = "password_hash", nullable = false, length = 255) private String passwordHash;
+    @Column(name = "password_hash", length = 255) private String passwordHash;
+    @Enumerated(EnumType.STRING) @Column(nullable = false, length = 20) @Builder.Default private AuthProvider provider = AuthProvider.LOCAL;
+    @Column(name = "google_sub", length = 255, unique = true) private String googleSub;
     @Column(name = "pending_email", length = 255) private String pendingEmail;
     @Column(name = "pending_phone", length = 20) private String pendingPhone;
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 20) private AccountStatus status;

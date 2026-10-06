@@ -125,12 +125,12 @@ export function SearchMap({ results }: { results: DiscoveryResult[] }) {
         {points.map(point => <button key={point.facility.id} type="button" aria-pressed={selected.facility.id === point.facility.id} onClick={() => select(point.facility.id)}
           className={`rounded-xl border p-4 text-left ${selected.facility.id === point.facility.id ? 'border-emerald-700 bg-emerald-50' : 'hover:bg-slate-50'}`}>
           <span className="flex items-center gap-2 font-semibold"><MapPin size={16} className="shrink-0 text-emerald-700" />{point.facility.name}</span>
-          <span className="mt-1 block text-sm text-slate-600">{point.courts.length} sân phù hợp · {point.facility.district}, {point.facility.province}</span>
+          <span className="mt-1 block text-sm text-slate-600">{point.courts.length} sân phù hợp · {point.facility.ward}, {point.facility.province}</span>
         </button>)}
       </div>
       <div className="min-w-0 rounded-2xl bg-slate-50 p-5" aria-live="polite">
         <h3 className="text-lg font-bold"><Link href={`/facilities/${selected.facility.id}`} className="hover:underline">{selected.facility.name}</Link></h3>
-        <p className="mt-2 text-sm text-slate-600">{selected.facility.addressLine} · {selected.facility.ward}, {selected.facility.district}, {selected.facility.province}</p>
+        <p className="mt-2 text-sm text-slate-600">{selected.facility.addressLine} · {selected.facility.ward}, {selected.facility.province}</p>
         <div className="mt-4 grid gap-3">
           {selected.courts.map(court => <article key={court.courtId} className="rounded-xl border bg-white p-4">
             <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">{court.sportName} · {court.date}</p>

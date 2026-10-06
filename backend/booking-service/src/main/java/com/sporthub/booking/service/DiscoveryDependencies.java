@@ -15,10 +15,10 @@ public class DiscoveryDependencies {
         factory.setReadTimeout(Duration.ofSeconds(5));
         facility = RestClient.builder().baseUrl(url).requestFactory(factory).build();
     }
-    public JsonNode facilities(String q, String province, String district, UUID category) {
+    public JsonNode facilities(String q, String provinceCode, UUID category) {
         return facility.get().uri(uri -> {
             uri.path("/api/v1/facilities");
-            if(q!=null)uri.queryParam("q",q);if(province!=null)uri.queryParam("province",province);if(district!=null)uri.queryParam("district",district);if(category!=null)uri.queryParam("sportCategoryId",category);
+            if(q!=null)uri.queryParam("q",q);if(provinceCode!=null)uri.queryParam("provinceCode",provinceCode);if(category!=null)uri.queryParam("sportCategoryId",category);
             return uri.build();
         }).retrieve().body(JsonNode.class).path("data");
     }

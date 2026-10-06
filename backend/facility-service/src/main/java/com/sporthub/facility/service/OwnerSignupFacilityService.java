@@ -17,6 +17,7 @@ public class OwnerSignupFacilityService {
  public void validate(JsonNode input)throws Exception {
   var facility=json.treeToValue(input.path("facility"),FacilityInput.class);
   if(facility==null||!validator.validate(facility).isEmpty()||facility.latitude()==null||facility.longitude()==null)throw new IllegalArgumentException("Invalid first facility or location");
+  com.sporthub.common.dto.VietnamAdministrativeDivisions.resolve(facility.provinceCode(),facility.wardCode());
   ZoneId.of(facility.timezone());var setup=json.treeToValue(input.path("setup"),OwnerSignupSetup.class);setup.validate();facilities.validateSignupCategory(setup.sportCategoryId());
  }
  public void prepare(UUID application,UUID facility,UUID user,JsonNode input)throws Exception {

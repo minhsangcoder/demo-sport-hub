@@ -1,82 +1,137 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
 import styles from '@/features/discovery/search-map.module.css'
+import { loadGoogleMaps } from './google-maps'
 
 export type FacilityLocation = { latitude: number; longitude: number } | null
-
-export function LocationPicker({ value, onChange, disabled = false }: {
+export function LocationPicker({ value, focusLocation, onChange, disabled = false }: {
   value: FacilityLocation
+  focusLocation: FacilityLocation
   onChange: (value: FacilityLocation) => void
   disabled?: boolean
 }) {
   const container = useRef<HTMLDivElement>(null)
-  const map = useRef<L.Map | null>(null)
-  const marker = useRef<L.Marker | null>(null)
-  const initial = useRef(value)
+  const map = useRef<google.maps.Map | null>(null)
+  const marker = useRef<google.maps.Marker | null>(null)
+  const valueRef = useRef(value)
+  const focusLocationRef = useRef(focusLocation)
   const locked = useRef(disabled)
+  const changeLocation = useRef(onChange)
   const [ready, setReady] = useState(false)
-  const [tileError, setTileError] = useState(false)
+  const [mapError, setMapError] = useState('')
 
-  useEffect(() => { locked.current = disabled }, [disabled])
   useEffect(() => {
-    if (!container.current) return
-    const element = container.current
-    const instance = L.map(element, { scrollWheelZoom: false })
-    map.current = instance
-    // A viewport only: never turn the default centre into a saved location.
-    instance.setView(initial.current ? [initial.current.latitude, initial.current.longitude] : [21.028, 105.78], 14)
-    const layer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19, referrerPolicy: 'origin',
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    })
-    layer.on('tileerror', () => { setTileError(true); setReady(true) })
-    layer.on('load', () => setReady(true))
-    layer.addTo(instance)
-    function select(point: L.LatLng) {
-      if (locked.current) return
-      const wrapped = point.wrap()
-      onChange({ latitude: Number(wrapped.lat.toFixed(7)), longitude: Number(wrapped.lng.toFixed(7)) })
-    }
-    instance.on('click', event => select(event.latlng))
-    function keyboard(event: KeyboardEvent) {
-      if (event.key === 'Enter' && event.target === element && !locked.current) {
-        event.preventDefault(); select(instance.getCenter())
+    valueRef.current = value
+    focusLocationRef.current = focusLocation
+    locked.current = disabled
+    changeLocation.current = onChange
+  }, [value, focusLocation, disabled, onChange])
+
+  useEffect(() => {
+    let active = true
+    const listeners: google.maps.MapsEventListener[] = []
+    let observer: ResizeObserver | undefined
+
+    async function initialize() {
+      try {
+        const { maps, marker: markerLibrary } = await loadGoogleMaps()
+        if (!active || !container.current) return
+
+        const selectedInitially = focusLocationRef.current ?? valueRef.current
+        const initial = selectedInitially
+          ? { lat: selectedInitially.latitude, lng: selectedInitially.longitude }
+          : { lat: 21.028, lng: 105.78 }
+        const instance = new maps.Map(container.current, {
+          center: initial,
+          zoom: selectedInitially ? 16 : 12,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: false,
+          clickableIcons: false,
+          gestureHandling: 'cooperative',
+        })
+        map.current = instance
+
+        const pin = new markerLibrary.Marker({
+          map: selectedInitially ? instance : null,
+          position: selectedInitially ? initial : null,
+          draggable: !locked.current,
+          title: 'Vị trí cơ sở đã chọn',
+        })
+        marker.current = pin
+
+        function selectPosition(position: google.maps.LatLng | google.maps.LatLngLiteral) {
+          if (locked.current) return
+          const point = typeof (position as google.maps.LatLng).lat === 'function'
+            ? position as google.maps.LatLng
+            : new google.maps.LatLng(position as google.maps.LatLngLiteral)
+          pin.setPosition(point)
+          pin.setMap(instance)
+          instance.panTo(point)
+          changeLocation.current({
+            latitude: Number(point.lat().toFixed(7)),
+            longitude: Number(point.lng().toFixed(7)),
+          })
+        }
+
+        listeners.push(instance.addListener('click', (event: google.maps.MapMouseEvent) => {
+          if (event.latLng) selectPosition(event.latLng)
+        }))
+        listeners.push(pin.addListener('dragend', () => {
+          const position = pin.getPosition()
+          if (position) selectPosition(position)
+        }))
+
+        observer = new ResizeObserver(() => google.maps.event.trigger(instance, 'resize'))
+        observer.observe(container.current)
+        setReady(true)
+      } catch (error) {
+        if (active) {
+          setMapError(error instanceof Error ? error.message : 'Không thể tải Google Maps.')
+          setReady(true)
+        }
       }
     }
-    element.addEventListener('keydown', keyboard)
-    const pin = L.marker([0, 0], {
-      draggable: true, keyboard: true, title: 'Vị trí cơ sở đã chọn',
-      icon: L.divIcon({ html: '●', className: styles.marker, iconSize: [36, 36], iconAnchor: [18, 36] }),
-    })
-    pin.on('add', () => pin.getElement()?.setAttribute('aria-label', 'Vị trí cơ sở đã chọn'))
-    pin.on('dragend', () => select(pin.getLatLng()))
-    marker.current = pin
-    const observer = new ResizeObserver(() => instance.invalidateSize({ pan: false }))
-    observer.observe(element)
+
+    void initialize()
     return () => {
-      observer.disconnect(); element.removeEventListener('keydown', keyboard)
-      layer.off(); instance.remove(); map.current = null; marker.current = null
+      active = false
+      observer?.disconnect()
+      for (const listener of listeners) listener.remove()
+      marker.current?.setMap(null)
+      map.current = null
+      marker.current = null
     }
-  }, [onChange])
+  }, [])
 
   useEffect(() => {
     if (!map.current || !marker.current) return
-    if (value) marker.current.setLatLng([value.latitude, value.longitude]).addTo(map.current)
-    else marker.current.remove()
-    if (disabled) marker.current.dragging?.disable()
-    else marker.current.dragging?.enable()
+    if (value) {
+      marker.current.setPosition({ lat: value.latitude, lng: value.longitude })
+      marker.current.setMap(map.current)
+    } else {
+      marker.current.setMap(null)
+    }
+    marker.current.setDraggable(!disabled)
   }, [value, disabled])
+
+  useEffect(() => {
+    if (!map.current || !focusLocation) return
+    map.current.setCenter({ lat: focusLocation.latitude, lng: focusLocation.longitude })
+    map.current.setZoom(17)
+  }, [focusLocation])
 
   return <section className="min-w-0 space-y-3 md:col-span-2" aria-label="Vị trí cơ sở">
     <h2 className="text-lg font-semibold">Vị trí cơ sở</h2>
-    <p id="location-instructions" className="text-sm text-slate-600">Chạm hoặc bấm trên bản đồ để đặt điểm; kéo điểm để điều chỉnh. Dùng phím mũi tên và +/− để di chuyển bản đồ, Enter để chọn tâm bản đồ. Vị trí chỉ được lưu khi gửi hoặc lưu biểu mẫu.</p>
-    <div ref={container} className={styles.canvas} role="region" aria-label="Chọn vị trí cơ sở trên bản đồ" aria-describedby="location-instructions" />
+    <p id="location-instructions" className="text-sm text-slate-600">
+      Tìm địa chỉ ở ô phía trên và chọn một gợi ý để đặt điểm, hoặc bấm lên bản đồ. Kéo marker để điều chỉnh vị trí.
+      Chọn địa chỉ sẽ cập nhật tọa độ, các trường hành chính có sẵn và mức phóng bản đồ.
+    </p>
+    <div ref={container} className={styles.canvas} role="region" aria-label="Chọn vị trí cơ sở trên Google Maps" aria-describedby="location-instructions" />
     {disabled && <p className="text-sm text-slate-500">Chọn vị trí đang tạm khóa.</p>}
-    {!ready && <p role="status" className="text-sm text-slate-500">Đang tải bản đồ…</p>}
-    {tileError && <p role="alert" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">Không tải được một phần bản đồ nền. Vị trí đã chọn vẫn được giữ; bạn có thể sửa địa chỉ và lưu thông tin, hoặc tải lại trang để thử bản đồ.</p>}
+    {!ready && <p role="status" className="text-sm text-slate-500">Đang tải Google Maps…</p>}
+    {mapError && <p role="alert" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{mapError}</p>}
     <p role="status" className="text-sm text-slate-600">{value ? `Vĩ độ: ${value.latitude.toFixed(7)} · Kinh độ: ${value.longitude.toFixed(7)}` : 'Chưa chọn vị trí. Tâm bản đồ mặc định không được lưu.'}</p>
     <p className="text-xs text-slate-500">Địa chỉ và điểm bản đồ được chỉnh riêng. Hãy kiểm tra cả hai trước khi lưu.</p>
   </section>

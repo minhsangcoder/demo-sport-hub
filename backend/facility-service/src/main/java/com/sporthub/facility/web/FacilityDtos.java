@@ -6,24 +6,25 @@ import java.util.*;
 public final class FacilityDtos {
  private FacilityDtos(){}
  public record FacilityInput(@NotBlank @Size(max=180) String name,@NotBlank @Size(max=30) String phone,
-  @NotBlank @Size(max=500) String addressLine,@NotBlank @Size(max=100) String province,
-  @NotBlank @Size(max=100) String district,@NotBlank @Size(max=100) String ward,
+  @NotBlank @Size(max=500) String addressLine,@NotBlank @Pattern(regexp="[0-9]{2}") String provinceCode,
+  @NotBlank @Size(max=100) String province,@NotBlank @Pattern(regexp="[0-9]{5}") String wardCode,
+  @NotBlank @Size(max=100) String ward,
   @Size(max=5000) String description,@NotBlank @Size(max=80) String timezone,
   @DecimalMin("-90") @DecimalMax("90") BigDecimal latitude,@DecimalMin("-180") @DecimalMax("180") BigDecimal longitude,
   @Size(max=30) Set<@NotBlank @Size(max=100) String> amenities,
   @Email @Size(max=254) String contactEmail,@com.fasterxml.jackson.annotation.JsonIgnore boolean contactEmailProvided,
   @com.fasterxml.jackson.annotation.JsonIgnore boolean latitudeProvided,@com.fasterxml.jackson.annotation.JsonIgnore boolean longitudeProvided){
   public FacilityInput {contactEmail=com.sporthub.common.dto.ContactEmail.normalize(contactEmail);}
-  public FacilityInput(String name,String phone,String addressLine,String province,String district,String ward,String description,String timezone,BigDecimal latitude,BigDecimal longitude,Set<String> amenities){this(name,phone,addressLine,province,district,ward,description,timezone,latitude,longitude,amenities,null,false,true,true);}
-  public FacilityInput(String name,String phone,String addressLine,String province,String district,String ward,String description,String timezone,BigDecimal latitude,BigDecimal longitude,Set<String> amenities,String contactEmail){this(name,phone,addressLine,province,district,ward,description,timezone,latitude,longitude,amenities,contactEmail,true,true,true);}
+  public FacilityInput(String name,String phone,String addressLine,String provinceCode,String province,String wardCode,String ward,String description,String timezone,BigDecimal latitude,BigDecimal longitude,Set<String> amenities){this(name,phone,addressLine,provinceCode,province,wardCode,ward,description,timezone,latitude,longitude,amenities,null,false,true,true);}
+  public FacilityInput(String name,String phone,String addressLine,String provinceCode,String province,String wardCode,String ward,String description,String timezone,BigDecimal latitude,BigDecimal longitude,Set<String> amenities,String contactEmail){this(name,phone,addressLine,provinceCode,province,wardCode,ward,description,timezone,latitude,longitude,amenities,contactEmail,true,true,true);}
   @AssertTrue(message="Supply both latitude and longitude, or omit both; both null clears the location")
   @com.fasterxml.jackson.annotation.JsonIgnore
   public boolean isLocationComplete(){return latitudeProvided==longitudeProvided && (latitude==null)==(longitude==null);}
   // Missing on an older PUT preserves the contact; explicit null/blank clears it.
   @com.fasterxml.jackson.annotation.JsonCreator
-  public static FacilityInput fromJson(@com.fasterxml.jackson.annotation.JsonProperty("name") String name,@com.fasterxml.jackson.annotation.JsonProperty("phone") String phone,@com.fasterxml.jackson.annotation.JsonProperty("addressLine") String addressLine,@com.fasterxml.jackson.annotation.JsonProperty("province") String province,@com.fasterxml.jackson.annotation.JsonProperty("district") String district,@com.fasterxml.jackson.annotation.JsonProperty("ward") String ward,@com.fasterxml.jackson.annotation.JsonProperty("description") String description,@com.fasterxml.jackson.annotation.JsonProperty("timezone") String timezone,@com.fasterxml.jackson.annotation.JsonProperty("latitude") com.fasterxml.jackson.databind.JsonNode latitude,@com.fasterxml.jackson.annotation.JsonProperty("longitude") com.fasterxml.jackson.databind.JsonNode longitude,@com.fasterxml.jackson.annotation.JsonProperty("amenities") Set<String> amenities,@com.fasterxml.jackson.annotation.JsonProperty("contactEmail") com.fasterxml.jackson.databind.JsonNode email){
+  public static FacilityInput fromJson(@com.fasterxml.jackson.annotation.JsonProperty("name") String name,@com.fasterxml.jackson.annotation.JsonProperty("phone") String phone,@com.fasterxml.jackson.annotation.JsonProperty("addressLine") String addressLine,@com.fasterxml.jackson.annotation.JsonProperty("provinceCode") String provinceCode,@com.fasterxml.jackson.annotation.JsonProperty("province") String province,@com.fasterxml.jackson.annotation.JsonProperty("wardCode") String wardCode,@com.fasterxml.jackson.annotation.JsonProperty("ward") String ward,@com.fasterxml.jackson.annotation.JsonProperty("description") String description,@com.fasterxml.jackson.annotation.JsonProperty("timezone") String timezone,@com.fasterxml.jackson.annotation.JsonProperty("latitude") com.fasterxml.jackson.databind.JsonNode latitude,@com.fasterxml.jackson.annotation.JsonProperty("longitude") com.fasterxml.jackson.databind.JsonNode longitude,@com.fasterxml.jackson.annotation.JsonProperty("amenities") Set<String> amenities,@com.fasterxml.jackson.annotation.JsonProperty("contactEmail") com.fasterxml.jackson.databind.JsonNode email){
    // Non-text JSON stays invalid email text, so @Valid returns the standard field-level 400.
-   return new FacilityInput(name,phone,addressLine,province,district,ward,description,timezone,coordinate(latitude),coordinate(longitude),amenities,email==null||email.isNull()?null:email.isTextual()?email.textValue():email.toString(),email!=null,latitude!=null,longitude!=null);
+   return new FacilityInput(name,phone,addressLine,provinceCode,province,wardCode,ward,description,timezone,coordinate(latitude),coordinate(longitude),amenities,email==null||email.isNull()?null:email.isTextual()?email.textValue():email.toString(),email!=null,latitude!=null,longitude!=null);
   }
   private static BigDecimal coordinate(com.fasterxml.jackson.databind.JsonNode value){
    if(value==null||value.isNull())return null;
@@ -32,10 +33,10 @@ public final class FacilityDtos {
    throw new IllegalArgumentException("Coordinates must be numeric");
   }
  }
- public record FacilityView(UUID id,UUID ownerId,String name,String phone,String addressLine,String province,String district,String ward,
+ public record FacilityView(UUID id,UUID ownerId,String name,String phone,String addressLine,String provinceCode,String province,String wardCode,String ward,
   String description,String timezone,BigDecimal latitude,BigDecimal longitude,String status,Set<String> amenities,long version){}
  /** Private Owner/applicant/Admin profile. Public FacilityView intentionally has no contactEmail. */
- public record FacilityProfileView(UUID id,UUID ownerId,String name,String phone,String addressLine,String province,String district,String ward,
+ public record FacilityProfileView(UUID id,UUID ownerId,String name,String phone,String addressLine,String provinceCode,String province,String wardCode,String ward,
   String description,String timezone,BigDecimal latitude,BigDecimal longitude,String status,Set<String> amenities,long version,String contactEmail){}
  public record CourtInput(@NotBlank @Size(max=50) String code,@NotBlank @Size(max=180) String name,@NotNull UUID sportCategoryId,
   @Size(max=5000) String description,boolean enabled){}

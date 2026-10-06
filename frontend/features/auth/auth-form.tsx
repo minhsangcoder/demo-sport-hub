@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useRef,useState } from 'react'
+import { useRef, useState } from 'react'
 import { OwnerSignupFields } from './owner-signup-fields'
 import { legalFrom } from '@/features/owner-application/legal-fields'
 import { facilityFrom } from '@/features/facility/facility-fields'
@@ -19,6 +19,10 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [applyAsOwner,setApplyAsOwner]=useState(false);const [ownerVisited,setOwnerVisited]=useState(false);const [location,setLocation]=useState<FacilityLocation>(null)
   const signupRetry=useRef<{fingerprint:string;key:string}|null>(null)
+  const googleError = mode === 'login' ? {
+    google_email_unverified: 'Xác minh email bằng phương thức đăng nhập hiện tại trước khi liên kết Google.',
+    google_account_unavailable: 'Không thể liên kết tài khoản Google với tài khoản SportHub này.',
+  }[params.get('authError') ?? ''] ?? (params.has('authError') ? 'Không thể đăng nhập bằng Google. Vui lòng thử lại.' : '') : ''
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (busy) return
     setBusy(true); setError(''); setSuccess(''); setFieldErrors({})
@@ -57,7 +61,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         setSuccess('Xác minh thành công. Bạn có thể đăng nhập.');
       } else if (mode === 'forgot') {
         await authApi.forgot(value('identifier'))
-        setSuccess('Nếu tài khoản hợp lệ, hướng dẫn đã được gửi. Ở local, xem email hoặc SMS demo trong Mailpit.')
+        setSuccess('Nếu tài khoản hợp lệ, hướng dẫn đã được gửi qua email hoặc SMS đã cấu hình.')
       } else {
         await authApi.reset({ challengeId: value('challengeId'), code: value('code'), newPassword: String(values.get('password') ?? '') })
         setSuccess('Mật khẩu đã được cập nhật và các phiên cũ đã thu hồi. Hãy đăng nhập lại.')
@@ -82,11 +86,31 @@ export function AuthForm({ mode }: { mode: Mode }) {
       {['verify','reset'].includes(mode) && !params.get('token') && <>
         {field('challengeId', 'Mã yêu cầu xác minh', { defaultValue: params.get('challengeId') ?? '', readOnly: Boolean(params.get('challengeId')) })}
         {field('code', 'Mã xác minh 6 chữ số', { pattern: '[0-9]{6}', inputMode: 'numeric', maxLength: 6, autoComplete: 'one-time-code' })}
-        <p className="text-xs text-slate-500">Mã và liên kết được gửi qua kênh liên hệ.{process.env.NEXT_PUBLIC_DEMO_MAILPIT_URL&&<> Local/demo: mở <a className="underline" href={process.env.NEXT_PUBLIC_DEMO_MAILPIT_URL} target="_blank" rel="noreferrer">Mailpit</a>.</>}</p>
+        <p className="text-xs text-slate-500">Mã và liên kết được gửi qua email hoặc SMS đã cấu hình.</p>
       </>}
-      {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+      {(error || googleError) && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error || googleError}</p>}
       {success && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{success} <Link className="underline" href={mode==='verify'&&/^[0-9a-f-]{36}$/.test(params.get('ownerApplicationId')??'')?`/login?next=${encodeURIComponent(`/owner/application/${params.get('ownerApplicationId')}`)}`:'/login'}>Đăng nhập</Link></p>}
       <Button className="h-11 bg-emerald-600 text-white hover:bg-emerald-700" type="submit" disabled={busy}>{busy ? 'Đang xử lý…' : mode === 'login' ? 'Đăng nhập' : mode === 'register' ? 'Tạo tài khoản' : mode === 'verify' ? 'Xác minh' : 'Tiếp tục'}</Button>
+      {(mode === 'login' || (mode === 'register' && !applyAsOwner)) && <>
+        <div className="flex items-center gap-3 text-xs text-slate-400"><span className="h-px flex-1 bg-slate-200" />HOẶC<span className="h-px flex-1 bg-slate-200" /></div>
+        <a
+          href="/api/v1/auth/oauth2/authorization/google"
+          onClick={() => {
+            const next = params.get('next')
+            if (next?.startsWith('/') && !next.startsWith('//')) {
+              window.sessionStorage.setItem('sporthub-google-next', next)
+            } else {
+              window.sessionStorage.removeItem('sporthub-google-next')
+            }
+          }}
+          aria-disabled={busy}
+          className={`flex h-11 items-center justify-center rounded-md border border-input bg-background px-4 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground ${busy ? 'pointer-events-none opacity-50' : ''}`}
+        >
+          <span aria-hidden="true" className="mr-2 font-bold text-blue-600">G</span>
+          Tiếp tục với Google
+        </a>
+        {mode === 'register' && <p className="text-xs text-slate-500">Đăng ký bằng Google sẽ tạo tài khoản Customer.</p>}
+      </>}
       <div className="flex flex-wrap justify-between gap-3 text-sm text-emerald-700"><Link href={mode === 'login' ? '/register' : '/login'}>{mode === 'login' ? 'Tạo tài khoản' : 'Quay lại đăng nhập'}</Link><Link href="/forgot-password">Quên mật khẩu?</Link></div>
     </form></CardContent></Card>
 }

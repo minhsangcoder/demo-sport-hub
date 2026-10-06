@@ -30,15 +30,20 @@ class TransferIntegrationTest {
  Caller customer(){return new Caller(UUID.randomUUID(),"Customer",Set.of("CUSTOMER"),Map.of());}String key(){return UUID.randomUUID().toString();}
  @BeforeEach void setup(){repo.jdbc().execute("TRUNCATE transfer_listings,request_idempotency,event_inbox,event_outbox CASCADE");seller=customer();buyer=customer();book=UUID.randomUUID();facility=UUID.randomUUID();court=UUID.randomUUID();when(clock.instant()).thenReturn(now);
   booking=json.valueToTree(Map.of("id",book,"facilityId",facility,"courtId",court,"currentHolderId",seller.id(),"startsAt",start,"endsAt",start.plusSeconds(3600),"paidAt",now,"status","CONFIRMED","amount",150000,"currency","VND"));when(dependencies.booking(book)).thenReturn(booking);when(dependencies.command(any(),any())).thenReturn(booking);
-  when(dependencies.policy(facility)).thenReturn(json.valueToTree(Map.of("configured",true,"enabled",true,"minLeadSeconds",3600)));when(dependencies.context(court)).thenReturn(json.valueToTree(Map.of("facility",Map.of("name","Court Center","addressLine","Test address","province","TP HCM","district","1","timezone","Asia/Ho_Chi_Minh","amenities",List.of()),"court",Map.of("name","Court 1","sportCategoryId",UUID.randomUUID()))));
+  when(dependencies.policy(facility)).thenReturn(json.valueToTree(Map.of("configured",true,"enabled",true,"minLeadSeconds",3600)));when(dependencies.context(court)).thenReturn(json.valueToTree(Map.of("facility",Map.of("name","Court Center","addressLine","Test address","provinceCode","01","province","Hà Nội","wardCode","00004","ward","Ba Đình","timezone","Asia/Ho_Chi_Minh","amenities",List.of()),"court",Map.of("name","Court 1","sportCategoryId",UUID.randomUUID()))));
  }
  UUID listing(){UUID id=service.create(new Create(book,new BigDecimal("100000"),start.minusSeconds(3600)),key(),seller);workflow.sync(id);return id;}
  JsonNode outcome(UUID acquisition,UUID payment,String status){return json.valueToTree(DomainEvent.create("payment.completed",1,"payment-service",payment,Map.of("acquisitionId",acquisition,"bookingId",book,"paymentId",payment,"payerId",buyer.id(),"purpose","TRANSFER","amount",100000,"currency","VND","status",status,"paidAt",clock.instant())));}
  @Test void listingPolicyPrivacyCapAndIdempotency(){
   String key=key();var input=new Create(book,new BigDecimal("100000"),start.minusSeconds(3600));UUID id=service.create(input,key,seller);assertThat(service.create(input,key,seller)).isEqualTo(id);workflow.sync(id);
   var view=service.market(null,null,null,null,null,"start",buyer).stream().filter(l->l.id().equals(id)).findFirst().orElseThrow();String publicJson=repo.write(view);assertThat(publicJson).doesNotContain(seller.id().toString(),book.toString(),"sellerId","phone","checkin");
+  assertThat(repo.find(id).snapshot().path("provinceCode").asText()).isEqualTo("01");assertThat(repo.find(id).snapshot().path("wardCode").asText()).isEqualTo("00004");assertThat(repo.find(id).snapshot().has("district")).isFalse();
   assertThatThrownBy(()->service.acquire(id,key(),seller)).isInstanceOf(ForbiddenException.class);assertThatThrownBy(()->service.edit(id,new Edit(new BigDecimal("150001"),start),seller)).isInstanceOf(ConflictException.class);
   when(dependencies.policy(facility)).thenReturn(json.valueToTree(Map.of("configured",false)));assertThatThrownBy(()->service.acquire(id,key(),buyer)).isInstanceOf(ConflictException.class).hasMessageContaining("BLOCKED_RULE");
+ }
+ @Test void legacyFacilityCodesStayJsonNullInVenueSnapshots(){
+  var context=dependencies.context(court).deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)context.path("facility")).remove(List.of("provinceCode","wardCode"));when(dependencies.context(court)).thenReturn(context);
+  var snapshot=repo.find(listing()).snapshot();assertThat(snapshot.path("provinceCode").isNull()).isTrue();assertThat(snapshot.path("wardCode").isNull()).isTrue();assertThat(snapshot.path("province").asText()).isEqualTo("Hà Nội");assertThat(snapshot.path("ward").asText()).isEqualTo("Ba Đình");
  }
  @Test void concurrentBuyersOnlyOneAcquisitionAndCancelReleases()throws Exception {
   UUID id=listing();var ready=new CountDownLatch(2);var go=new CountDownLatch(1);var pool=Executors.newFixedThreadPool(2);var buyers=List.of(buyer,customer());var futures=new ArrayList<Future<UUID>>();

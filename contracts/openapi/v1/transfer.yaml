@@ -892,13 +892,32 @@
             "format": "uuid"
           },
           "address": {
-            "type": "string"
+            "type": "string",
+            "description": "House number, street and additional address details from the facility."
+          },
+          "provinceCode": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 2,
+            "pattern": "^[0-9]{2}$",
+            "description": "Current administrative code on newly created snapshots; absent on retained legacy snapshots, or null for an unmapped legacy facility.",
+            "nullable": true
           },
           "province": {
-            "type": "string"
+            "type": "string",
+            "description": "Province/city display name."
           },
-          "district": {
-            "type": "string"
+          "wardCode": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 5,
+            "pattern": "^[0-9]{5}$",
+            "description": "Current administrative code on newly created snapshots; absent on retained legacy snapshots, or null for an unmapped legacy facility.",
+            "nullable": true
+          },
+          "ward": {
+            "type": "string",
+            "description": "Commune/ward display name on current two-level address snapshots."
           },
           "timezone": {
             "type": "string"
@@ -916,10 +935,10 @@
           "sportCategoryId",
           "address",
           "province",
-          "district",
           "timezone",
           "amenities"
-        ]
+        ],
+        "description": "New venue snapshots include province/city and commune/ward codes and display names. Historical immutable snapshots may omit the current administrative codes and commune/ward field."
       },
       "Listing": {
         "type": "object",

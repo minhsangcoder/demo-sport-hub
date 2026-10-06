@@ -104,7 +104,7 @@ public class AuthService {
         User user = emailLogin
                 ? userRepository.findByEmailIgnoreCase(identifier).orElseThrow(this::invalidCredentials)
                 : userRepository.findByPhone(identifier).orElseThrow(this::invalidCredentials);
-        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+        if (user.getPasswordHash() == null || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             throw invalidCredentials();
         }
         boolean identifierVerified = emailLogin ? user.isEmailVerified() : user.isPhoneVerified();
@@ -114,6 +114,71 @@ public class AuthService {
         user.setLastLoginAt(Instant.now());
         SessionTokens tokens = refreshSessionService.issue(user, metadata);
         auditService.record(user.getId(), "LOGIN", "USER", user.getId(), metadata);
+        return tokens;
+    }
+
+    @Transactional
+    public SessionTokens loginWithGoogle(GoogleIdentity identity, RequestMetadata metadata) {
+        if (!identity.emailVerified() || identity.googleSub() == null || identity.googleSub().isBlank()
+                || identity.email() == null || !identity.email().contains("@")) {
+            throw new IdentityException(HttpStatus.UNAUTHORIZED, "IDENTITY-GOOGLE-CLAIMS",
+                    "Google did not provide a verified email address");
+        }
+
+        String email = normalizeEmail(identity.email());
+        User user = userRepository.findByGoogleSub(identity.googleSub()).orElse(null);
+        if (user == null) {
+            user = userRepository.findByEmailIgnoreCase(email).orElse(null);
+            if (user == null) {
+                String fullName = identity.name() == null || identity.name().isBlank()
+                        ? email.substring(0, email.indexOf('@')) : identity.name().trim();
+                user = userRepository.save(User.builder()
+                        .email(email)
+                        .passwordHash(null)
+                        .provider(AuthProvider.GOOGLE)
+                        .googleSub(identity.googleSub())
+                        .status(AccountStatus.ACTIVE)
+                        .emailVerified(true)
+                        .roles(new java.util.LinkedHashSet<>(java.util.Set.of(Role.CUSTOMER)))
+                        .build());
+                UserProfile profile = profileRepository.save(UserProfile.builder()
+                        .user(user)
+                        .fullName(fullName)
+                        .avatarUrl(verifiedAvatar(identity.avatarUrl()))
+                        .build());
+                user.setProfile(profile);
+            } else {
+                if (!user.isEmailVerified()) {
+                    throw new IdentityException(HttpStatus.FORBIDDEN, "IDENTITY-GOOGLE-EMAIL-UNVERIFIED",
+                            "Verify this email address before linking a Google account");
+                }
+                if (user.getProvider() == AuthProvider.GOOGLE
+                        && !identity.googleSub().equals(user.getGoogleSub())) {
+                    throw new IdentityException(HttpStatus.CONFLICT, "IDENTITY-GOOGLE-ACCOUNT-CONFLICT",
+                            "This email is already linked to another Google account");
+                }
+                user.setProvider(AuthProvider.GOOGLE);
+                user.setGoogleSub(identity.googleSub());
+                UserProfile profile = user.getProfile();
+                if (profile != null) {
+                    if ((profile.getFullName() == null || profile.getFullName().isBlank())
+                            && identity.name() != null && !identity.name().isBlank()) {
+                        profile.setFullName(identity.name().trim());
+                    }
+                    String avatarUrl = verifiedAvatar(identity.avatarUrl());
+                    if ((profile.getAvatarUrl() == null || profile.getAvatarUrl().isBlank()) && avatarUrl != null) {
+                        profile.setAvatarUrl(avatarUrl);
+                    }
+                }
+            }
+        }
+
+        if (user.getStatus() != AccountStatus.ACTIVE || user.getRoles().isEmpty()) {
+            throw new IdentityException(HttpStatus.FORBIDDEN, "IDENTITY-ACCOUNT-INACTIVE", "Account is not active");
+        }
+        user.setLastLoginAt(Instant.now());
+        SessionTokens tokens = refreshSessionService.issue(user, metadata);
+        auditService.record(user.getId(), "GOOGLE_LOGIN", "USER", user.getId(), metadata);
         return tokens;
     }
 
@@ -173,5 +238,10 @@ public class AuthService {
 
     private IdentityException conflict(String code, String message) {
         return new IdentityException(HttpStatus.CONFLICT, code, message);
+    }
+
+    private String verifiedAvatar(String avatarUrl) {
+        return avatarUrl != null && avatarUrl.startsWith("https://") && avatarUrl.length() <= 2048
+                ? avatarUrl : null;
     }
 }

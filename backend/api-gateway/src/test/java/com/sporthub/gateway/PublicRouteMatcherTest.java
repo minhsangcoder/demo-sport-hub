@@ -15,12 +15,15 @@ class PublicRouteMatcherTest {
         GatewaySecurityProperties properties = new GatewaySecurityProperties();
         properties.setPublicPaths(List.of(
                 "/api/v1/auth/login",
+                "/api/v1/auth/oauth2/**",
                 "/api/v1/auth/forgot-password",
                 "/api/v1/bookings/search",
                 "/actuator/health/**"));
         PublicRouteMatcher matcher = new PublicRouteMatcher(properties);
 
         assertThat(matcher.isPublic("/api/v1/auth/login")).isTrue();
+        assertThat(matcher.isPublic("/api/v1/auth/oauth2/authorization/google")).isTrue();
+        assertThat(matcher.isPublic("/api/v1/auth/oauth2/callback/google")).isTrue();
         assertThat(matcher.isPublic("/actuator/health/readiness")).isTrue();
         assertThat(matcher.isPublic("/api/v1/users/me")).isFalse();
         assertThat(matcher.isPublic("/api/v1/staff-bindings")).isFalse();

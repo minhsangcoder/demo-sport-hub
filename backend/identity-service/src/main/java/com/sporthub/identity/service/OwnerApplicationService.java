@@ -30,17 +30,17 @@ public class OwnerApplicationService {
  }
  public HistoryPage history(UUID id,int page,int size,AuthenticatedUser actor){admin(actor);row(id);var result=historyReader.read(id,page,size);audit(id,actor.userId(),"ADMIN_OWNER_APPLICATION_HISTORY_VIEWED",Map.of());return result;}
  public Summary create(Create input,AuthenticatedUser actor){
-  validate(input);UUID id=tx.execute(status->{active(actor.userId());var roles=jdbc.queryForList("SELECT role FROM user_roles WHERE user_id=?",String.class,actor.userId());if(!roles.contains("CUSTOMER")||roles.contains("OWNER"))throw fail(HttpStatus.FORBIDDEN,"A verified Customer without Owner role must apply");
+  var canonical=canonical(input);UUID id=tx.execute(status->{active(actor.userId());var roles=jdbc.queryForList("SELECT role FROM user_roles WHERE user_id=?",String.class,actor.userId());if(!roles.contains("CUSTOMER")||roles.contains("OWNER"))throw fail(HttpStatus.FORBIDDEN,"A verified Customer without Owner role must apply");
    if(!jdbc.queryForList("SELECT id FROM owner_applications WHERE user_id=? AND state<>'REJECTED'",UUID.class,actor.userId()).isEmpty())throw conflict("An open Owner application already exists");
-   UUID next=UUID.randomUUID();jdbc.update("INSERT INTO owner_applications(id,user_id,facility_id,business_name,facility_name,private_payload,initial_facility) VALUES(?,?,?,?,?,?,?::jsonb)",next,actor.userId(),UUID.randomUUID(),input.legal().businessName().trim(),input.facility().name().trim(),cipher.seal(write(input.legal()),next),write(input.facility()));audit(next,actor.userId(),"OWNER_APPLICATION_CREATED",null,Map.of("state","DRAFT"));return next;
+   UUID next=UUID.randomUUID();jdbc.update("INSERT INTO owner_applications(id,user_id,facility_id,business_name,facility_name,private_payload,initial_facility) VALUES(?,?,?,?,?,?,?::jsonb)",next,actor.userId(),UUID.randomUUID(),canonical.legal().businessName().trim(),canonical.facility().name().trim(),cipher.seal(write(canonical.legal()),next),write(canonical.facility()));audit(next,actor.userId(),"OWNER_APPLICATION_CREATED",null,Map.of("state","DRAFT"));return next;
   });try{ensureFacility(row(id));}catch(RuntimeException ex){jdbc.update("UPDATE owner_applications SET last_error='Facility setup is pending; initialize again safely' WHERE id=?",id);}return summary(row(id));
  }
  // Package-private trusted registration entry point: no generic Guest application API.
  UUID createForRegistration(Create input,UUID user){
-  validate(input);return tx.execute(status->{
+  var canonical=canonical(input);return tx.execute(status->{
    var account=jdbc.queryForMap("SELECT status FROM users WHERE id=? FOR UPDATE",user);
    if(!account.get("status").equals("PENDING_VERIFICATION"))throw conflict("Registration account must await verification");
-   UUID id=UUID.randomUUID();jdbc.update("INSERT INTO owner_applications(id,user_id,facility_id,business_name,facility_name,private_payload,initial_facility) VALUES(?,?,?,?,?,?,?::jsonb)",id,user,UUID.randomUUID(),input.legal().businessName().trim(),input.facility().name().trim(),cipher.seal(write(input.legal()),id),write(input.facility()));
+   UUID id=UUID.randomUUID();jdbc.update("INSERT INTO owner_applications(id,user_id,facility_id,business_name,facility_name,private_payload,initial_facility) VALUES(?,?,?,?,?,?,?::jsonb)",id,user,UUID.randomUUID(),canonical.legal().businessName().trim(),canonical.facility().name().trim(),cipher.seal(write(canonical.legal()),id),write(canonical.facility()));
    audit(id,user,"OWNER_APPLICATION_CREATED",null,Map.of("state","DRAFT","entryPoint","REGISTRATION"));return id;
   });
  }
@@ -93,6 +93,7 @@ public class OwnerApplicationService {
  private void editable(Map<String,Object> data){if(!Set.of("DRAFT","SUPPLEMENT_REQUIRED").contains(state(data)))throw conflict("Application is frozen; wait for a supplement decision or create a new application after rejection");}
  private void admin(AuthenticatedUser actor){if(actor==null||!actor.roles().contains(Role.ADMIN))throw fail(HttpStatus.FORBIDDEN,"Admin role required");}
  private void validate(Object value){if(value==null||!validator.validate(value).isEmpty())throw fail(HttpStatus.BAD_REQUEST,"Invalid application input");}
+ private Create canonical(Create input){validate(input);try{return new Create(input.legal(),input.facility().canonicalAddress());}catch(IllegalArgumentException ex){throw fail(HttpStatus.BAD_REQUEST,ex.getMessage());}}
  private String state(Map<String,Object> data){return (String)data.get("state");}
  private Legal legal(Map<String,Object> data){try{return json.readValue(cipher.open((String)data.get("private_payload"),(UUID)data.get("id")),Legal.class);}catch(IdentityException ex){throw ex;}catch(Exception ex){throw new IllegalStateException(ex);}}
  private Summary summary(Map<String,Object> r){return new Summary((UUID)r.get("id"),(UUID)r.get("user_id"),(UUID)r.get("facility_id"),(String)r.get("business_name"),(String)r.get("facility_name"),state(r),r.get("submitted_at")==null?null:instant(r.get("submitted_at")),(String)r.get("reason"),(java.math.BigDecimal)r.get("commission_percent"),(String)r.get("last_error"));}

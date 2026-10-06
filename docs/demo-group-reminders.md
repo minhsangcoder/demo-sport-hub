@@ -10,7 +10,7 @@ Start the preserved demo from the worktree:
 ./scripts/demo/smoke-group-reminders.ps1
 ```
 
-Frontend: http://localhost:13000. Gateway: http://localhost:18080/api/v1. Mailpit: http://localhost:18025. Seed customer/customer2/owner/staff at @sporthub.local use the ignored local DEMO_PASSWORD. No password/token is stored in fixture output. Smoke logs out its own sessions and retains its CONFIRMED demonstration booking, as the existing Group smoke does.
+Frontend: http://localhost:13000. Gateway: http://localhost:18080/api/v1. Configure `MAIL_HOST`/`MAIL_PORT` and credentials in `.env` to receive notices. Seed customer/customer2/owner/staff at @sporthub.local use the ignored local DEMO_PASSWORD. No password/token is stored in fixture output. The reminder smoke queries a Mailpit-compatible inbox API and needs a separately configured test inbox. Smoke logs out its own sessions and retains its CONFIRMED demonstration booking, as the existing Group smoke does.
 
 For UI inspection, run smoke-group-reminders.ps1 -PrepareOnly (or -LeavePending to retain the exercised group). It writes nonsecret group/member IDs/deadline to ignored tmp/demo/group-reminder-fixture.json. Open /customer/groups/{groupId} as customer. These are real members/allocations with Staff's share paid through the existing DemoPaymentProvider; no direct fake financial rows. Complete the remaining demo contributions before the displayed deadline when finished. Preparation intentionally leaves a pending group for testing; it does not claim a completed smoke.
 

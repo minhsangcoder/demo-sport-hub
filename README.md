@@ -11,7 +11,7 @@ SportHub là đồ án tốt nghiệp xây dựng nền tảng Web tìm kiếm, 
 - Tìm sân theo khu vực/bộ môn/ngày/giờ/giá/khoảng cách bằng lịch trống thật; giữ chỗ, payment demo, booking/QR và Staff check-in/complete
 - Group invitation/split/contribution/confirmation và Transfer marketplace/payment/handoff
 - Admin account controls, hồ sơ kiểm duyệt, Booking/Payment monitoring, source reports và audit
-- Bảy backend service, frontend production, sáu PostgreSQL database và PostgreSQL/Redis/RabbitMQ/MinIO/Mailpit trong Compose
+- Bảy backend service, frontend production, sáu PostgreSQL database và PostgreSQL/Redis/RabbitMQ/MinIO trong Compose
 - OpenAPI theo service; outbox/inbox, retry, DLQ và idempotency
 
 Phần còn lại hoặc bị cô lập theo quy tắc nghiệp vụ:
@@ -63,7 +63,23 @@ sport-court-booking-system/
 
 Sao chép `.env.example` thành `.env`, sau đó thay toàn bộ marker `__REPLACE_*__`. Không commit `.env` hoặc secret thật.
 
-JWT target: access token 15 phút, refresh token 7 ngày, refresh token lưu trong HttpOnly cookie và access token chỉ giữ trong memory của frontend. Mailpit nhận email local tại `http://localhost:8025`.
+JWT access token có hiệu lực 15 phút; refresh token 7 ngày được lưu trong HttpOnly cookie và access token chỉ giữ trong memory của frontend. Cấu hình SMTP qua `MAIL_HOST`, `MAIL_PORT` và các biến `MAIL_*`; Compose không chạy mail catcher.
+
+### Google OAuth local
+
+Tạo OAuth 2.0 Client ID loại Web application trong Google Cloud Console. Thêm Authorized redirect URI `http://localhost:13000/api/v1/auth/oauth2/callback/google`, rồi điền `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` và `GOOGLE_REDIRECT_URI` trong `.env`. Không bật Gmail API. OAuth chỉ dùng OpenID Connect (`openid`, `profile`, `email`); API của SportHub tiếp tục dùng JWT/refresh token riêng.
+
+Với deployment, đặt `GOOGLE_REDIRECT_URI` thành URL HTTPS public cùng origin frontend có proxy `/api/v1/*` tới Gateway, ví dụ `https://sporthub.example.com/api/v1/auth/oauth2/callback/google`, và khai báo chính xác URL đó trong Google Cloud Console. `APP_PUBLIC_URL` phải là origin frontend tương ứng.
+
+### Google Maps cho vị trí cơ sở
+
+Đặt `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` trong `.env` để bật bản đồ và Places Autocomplete. Bật **Maps JavaScript API** và **Places API (New)** trong cùng Google Cloud project có billing đang hoạt động. Trong Credentials → API key → API restrictions, cho phép cả hai API này. Autocomplete hiện dùng `AutocompleteSuggestion.fetchAutocompleteSuggestions()` của Places API (New), nên chỉ cấp quyền Places API (Legacy) sẽ không đủ. Hạn chế key bằng Website/HTTP referrers cho origin frontend (local: `http://localhost:13000/*`; thêm `http://127.0.0.1:13000/*` nếu dùng địa chỉ này; production: domain của bạn). Key này được gửi tới trình duyệt nên không phải server secret; bảo vệ bằng API/referrer restrictions. Sau khi đổi key, build lại frontend.
+
+Nếu Places trả HTTP 403 với `API_KEY_SERVICE_BLOCKED` và service `places.googleapis.com`, kiểm tra Places API (New) đã bật và nằm trong API restrictions của key. Nếu chỉ đổi quyền của key hiện tại, tải lại trang để kiểm tra; không cần build lại. Khi chạy `pnpm dev` trực tiếp trong `frontend/`, cung cấp key qua biến môi trường hoặc `frontend/.env.local`; Next.js không tự đọc `.env` ở repository root. Xem [hướng dẫn giới hạn API key của Google](https://developers.google.com/maps/api-security-best-practices).
+
+Places Autocomplete giới hạn kết quả trong Việt Nam. Chọn gợi ý sẽ cập nhật vị trí và zoom; tỉnh/thành phố và xã/phường được đối chiếu với danh mục hành chính hiện hành khi khớp. Địa chỉ chi tiết chỉ lưu số nhà, đường và phần địa chỉ cụ thể; tỉnh/thành phố và xã/phường bắt buộc chọn từ danh sách. Dữ liệu danh mục theo cơ cấu hai cấp sau đợt sắp xếp hành chính năm 2025, được cung cấp bởi [Open Admin Data](https://github.com/open-admin-data/vietnam-administrative-divisions), giấy phép CC BY 4.0; xem thuộc tính `attribution` trong `frontend/features/facility/vietnam-administrative-divisions.json`. Discovery map hiện vẫn dùng Leaflet nên package Leaflet chưa thể xóa.
+
+Dropdown xã/phường chỉ chứa đơn vị thuộc tỉnh/thành phố đã chọn; đổi tỉnh/thành phố sẽ xóa lựa chọn xã/phường. API lưu `provinceCode`/`wardCode` cùng tên hiển thị chuẩn, kiểm tra mã và quan hệ trực thuộc ở backend. Bộ lọc tìm sân dùng `provinceCode`. Migration Facility V9/V10, Identity V9 và Transfer V2 loại bỏ quận/huyện khỏi bảng và snapshot địa chỉ; bản ghi cũ chưa xác định được mã cần chọn lại hai đơn vị trước khi lưu. Các nội dung khác của hồ sơ đã nộp và lịch sử xét duyệt được giữ nguyên.
 
 ## Chạy hạ tầng local
 
@@ -85,9 +101,9 @@ Compose mặc định chỉ khởi động infrastructure. Để tạo cấu hì
 .\scripts\demo\smoke-booking-payment.ps1
 ```
 
-Script build image tuần tự để dùng chung cache Maven; chỉ dừng JVM demo thuộc checkout này khi chuyển sang container. `.env` có sẵn được giữ nguyên. Mặc định demo: frontend `http://localhost:13000`, Gateway `http://localhost:18080`, Mailpit `http://localhost:18025`. `start-apps.ps1` đồng bộ public links và CORS với port frontend; `-PublicUrl` hỗ trợ một địa chỉ demo khác.
+Script build image tuần tự để dùng chung cache Maven; chỉ dừng JVM demo thuộc checkout này khi chuyển sang container. `.env` có sẵn được giữ nguyên. Mặc định demo: frontend `http://localhost:13000`, Gateway `http://localhost:18080`. `start-apps.ps1` đồng bộ public links và CORS với port frontend; `-PublicUrl` hỗ trợ một địa chỉ demo khác. Email xác minh, đặt lại mật khẩu và thông báo cần một SMTP server được cấu hình; SMS demo tắt mặc định.
 
-Tài khoản seed: `customer`, `customer2`, `owner`, `staff`, `admin` tại `@sporthub.local`; mật khẩu là `DEMO_PASSWORD` trong `.env`. Seed và SMS qua Mailpit chỉ bật trong local/demo. Payment demo không chuyển tiền thật; escrow/refund không tự chọn chính sách.
+Tài khoản seed: `customer`, `customer2`, `owner`, `staff`, `admin` tại `@sporthub.local`; mật khẩu là `DEMO_PASSWORD` trong `.env`. Seed chỉ bật trong local/demo. Payment demo không chuyển tiền thật; escrow/refund không tự chọn chính sách.
 
 ## Frontend
 
