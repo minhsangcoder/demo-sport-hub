@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "next typegen && tsc --noEmit --incremental false",
+    "test:auth": "node --test tests/google-auth.test.mjs",
     "lint": "eslint ."
   },
   "dependencies": {

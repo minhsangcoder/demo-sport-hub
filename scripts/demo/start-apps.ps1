@@ -7,6 +7,12 @@ foreach($line in [IO.File]::ReadAllLines((Join-Path $demoRoot '.env'))){if($line
 if(!$PublicUrl){$frontendPort=if($demoValues.FRONTEND_PORT){$demoValues.FRONTEND_PORT}else{'3000'};$PublicUrl="http://localhost:$frontendPort"}
 $env:APP_PUBLIC_URL=$PublicUrl
 $env:CORS_ALLOWED_ORIGIN=$PublicUrl
+if($PSBoundParameters.ContainsKey('PublicUrl') -or !$demoValues.GOOGLE_REDIRECT_URI){
+ $env:GOOGLE_REDIRECT_URI=$PublicUrl.TrimEnd('/')+'/api/v1/auth/oauth2/callback/google'
+}else{$env:GOOGLE_REDIRECT_URI=$demoValues.GOOGLE_REDIRECT_URI}
+if($PSBoundParameters.ContainsKey('PublicUrl') -or !$demoValues.SECURE_COOKIE){
+ $env:SECURE_COOKIE=if($PublicUrl.StartsWith('https://')){'true'}else{'false'}
+}else{$env:SECURE_COOKIE=$demoValues.SECURE_COOKIE}
 Push-Location $demoRoot
 try{
  if(!$SkipBuild){& (Join-Path $PSScriptRoot 'build-apps.ps1')}

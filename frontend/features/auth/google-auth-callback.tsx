@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { refreshSession } from '@/lib/api'
+import { consumeGoogleNext } from './google-auth-state'
 
 export function GoogleAuthCallback() {
   const router = useRouter()
@@ -11,12 +12,8 @@ export function GoogleAuthCallback() {
   useEffect(() => {
     let active = true
     void refreshSession().then(() => {
-      const storedNext = window.sessionStorage.getItem('sporthub-google-next')
-      window.sessionStorage.removeItem('sporthub-google-next')
-      const next = storedNext?.startsWith('/') && !storedNext.startsWith('//')
-        ? storedNext
-        : '/customer/profile'
-      if (active) router.replace(next)
+      if (!active) return
+      router.replace(consumeGoogleNext())
     }).catch(() => {
       if (active) setError(true)
     })

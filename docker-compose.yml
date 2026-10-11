@@ -122,7 +122,9 @@ services:
       FRONTEND_BASE_URL: ${APP_PUBLIC_URL:-http://localhost:3000}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:13000/api/v1/auth/oauth2/callback/google}
+      # An empty callback is derived from FRONTEND_BASE_URL by identity-service.
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+      SECURE_COOKIE: ${SECURE_COOKIE:-false}
       OWNER_APPLICATION_DATA_KEY: ${OWNER_APPLICATION_DATA_KEY:?Set a separate Base64 owner application data key}
     depends_on:
       postgres:

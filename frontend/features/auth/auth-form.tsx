@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useRef, useState } from 'react'
 import { OwnerSignupFields } from './owner-signup-fields'
+import { postLoginPath, rememberGoogleNext } from './google-auth-state'
 import { legalFrom } from '@/features/owner-application/legal-fields'
 import { facilityFrom } from '@/features/facility/facility-fields'
 import { validateSignupFiles } from '@/features/facility/document-file-field'
@@ -20,6 +21,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const [applyAsOwner,setApplyAsOwner]=useState(false);const [ownerVisited,setOwnerVisited]=useState(false);const [location,setLocation]=useState<FacilityLocation>(null)
   const signupRetry=useRef<{fingerprint:string;key:string}|null>(null)
   const googleError = mode === 'login' ? {
+    google_not_configured: 'Đăng nhập Google chưa được cấu hình. Bạn có thể dùng email hoặc số điện thoại để tiếp tục.',
     google_email_unverified: 'Xác minh email bằng phương thức đăng nhập hiện tại trước khi liên kết Google.',
     google_account_unavailable: 'Không thể liên kết tài khoản Google với tài khoản SportHub này.',
   }[params.get('authError') ?? ''] ?? (params.has('authError') ? 'Không thể đăng nhập bằng Google. Vui lòng thử lại.' : '') : ''
@@ -31,8 +33,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
     try {
       if (mode === 'login') {
         await authApi.login(value('identifier'), String(values.get('password') ?? ''))
-        const next=params.get('next')
-        router.push(next?.startsWith('/')&&!next.startsWith('//')?next:'/customer/profile')
+        router.push(postLoginPath(params.get('next')))
       } else if (mode === 'register') {
         const contact = value('identifier')
         const account={fullName:value('fullName'),password:String(values.get('password')??''),...(contact.includes('@')?{email:contact}:{phone:contact})}
@@ -95,15 +96,12 @@ export function AuthForm({ mode }: { mode: Mode }) {
         <div className="flex items-center gap-3 text-xs text-slate-400"><span className="h-px flex-1 bg-slate-200" />HOẶC<span className="h-px flex-1 bg-slate-200" /></div>
         <a
           href="/api/v1/auth/oauth2/authorization/google"
-          onClick={() => {
-            const next = params.get('next')
-            if (next?.startsWith('/') && !next.startsWith('//')) {
-              window.sessionStorage.setItem('sporthub-google-next', next)
-            } else {
-              window.sessionStorage.removeItem('sporthub-google-next')
-            }
+          onClick={(event) => {
+            if (busy) { event.preventDefault(); return }
+            rememberGoogleNext(params.get('next'))
           }}
           aria-disabled={busy}
+          tabIndex={busy ? -1 : undefined}
           className={`flex h-11 items-center justify-center rounded-md border border-input bg-background px-4 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground ${busy ? 'pointer-events-none opacity-50' : ''}`}
         >
           <span aria-hidden="true" className="mr-2 font-bold text-blue-600">G</span>

@@ -44,7 +44,17 @@ public class FacilityReviewService {
  private FacilityView decideInternal(UUID id,String action,String reason,Caller actor,boolean first){
   actor.requireRole("ADMIN");lock(id);var f=facilities.find(id);String before=f.getStatus();String state;
   switch(action){
-   case "APPROVE","REJECT","SUPPLEMENT_REQUIRED"->{if(!before.equals("PENDING_APPROVAL"))throw new ConflictException("Facility is not pending review");if(!action.equals("APPROVE")&&reason.trim().length()<20)throw new IllegalArgumentException("Rejection/supplement reason must contain at least 20 characters");state=action.equals("APPROVE")?"ACTIVE":action.equals("REJECT")?"REJECTED":"DRAFT";var pending=jdbc.queryForList("SELECT id FROM facility_reviews WHERE facility_id=? AND state='PENDING_APPROVAL' FOR UPDATE",UUID.class,id);if(pending.size()!=1)throw new ConflictException("Pending review missing");UUID review=pending.getFirst();String result=action.equals("APPROVE")?"APPROVED":action;jdbc.update("UPDATE facility_reviews SET state=?,reviewed_at=NOW(),reviewed_by=?,reason=? WHERE id=?",result,actor.id(),reason,review);if(!first)outbox.record("sporthub.facility",DomainEvent.create("facility.reviewed",1,"facility-service",id,Map.of("reviewId",review,"facilityId",id,"ownerId",f.getOwnerId(),"facilityName",f.getName(),"state",result,"reason",reason)));}
+   case "APPROVE","REJECT","SUPPLEMENT_REQUIRED"->{
+    if(!before.equals("PENDING_APPROVAL"))throw new ConflictException("Facility is not pending review");
+    if(!action.equals("APPROVE")&&reason.trim().length()<20)throw new IllegalArgumentException("Rejection/supplement reason must contain at least 20 characters");
+    state=action.equals("APPROVE")?"ACTIVE":action.equals("REJECT")?"REJECTED":"DRAFT";
+    var pending=jdbc.queryForList("SELECT id FROM facility_reviews WHERE facility_id=? AND state='PENDING_APPROVAL' FOR UPDATE",UUID.class,id);
+    if(pending.size()!=1)throw new ConflictException("Pending review missing");
+    UUID review=pending.getFirst();
+    String result=switch(action){case "APPROVE"->"APPROVED";case "REJECT"->"REJECTED";default->action;};
+    jdbc.update("UPDATE facility_reviews SET state=?,reviewed_at=NOW(),reviewed_by=?,reason=? WHERE id=?",result,actor.id(),reason,review);
+    if(!first)outbox.record("sporthub.facility",DomainEvent.create("facility.reviewed",1,"facility-service",id,Map.of("reviewId",review,"facilityId",id,"ownerId",f.getOwnerId(),"facilityName",f.getName(),"state",result,"reason",reason)));
+   }
    default->throw new IllegalArgumentException("Unsupported review action");
   }
   f.setStatus(state);audit(f,actor,"ADMIN_FACILITY_"+action,Map.of("before",before,"after",state,"reason",reason));return facilities.view(f);

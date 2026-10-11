@@ -67,9 +67,13 @@ JWT access token có hiệu lực 15 phút; refresh token 7 ngày được lưu 
 
 ### Google OAuth local
 
-Tạo OAuth 2.0 Client ID loại Web application trong Google Cloud Console. Thêm Authorized redirect URI `http://localhost:13000/api/v1/auth/oauth2/callback/google`, rồi điền `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` và `GOOGLE_REDIRECT_URI` trong `.env`. Không bật Gmail API. OAuth chỉ dùng OpenID Connect (`openid`, `profile`, `email`); API của SportHub tiếp tục dùng JWT/refresh token riêng.
+Tạo OAuth 2.0 Client ID loại **Web application** trong Google Cloud Console, rồi điền `GOOGLE_CLIENT_ID` và `GOOGLE_CLIENT_SECRET` trong `.env`. Khi hai giá trị này còn trống, Google OAuth chưa được bật; nút Google sẽ quay về trang đăng nhập với thông báo chưa cấu hình.
 
-Với deployment, đặt `GOOGLE_REDIRECT_URI` thành URL HTTPS public cùng origin frontend có proxy `/api/v1/*` tới Gateway, ví dụ `https://sporthub.example.com/api/v1/auth/oauth2/callback/google`, và khai báo chính xác URL đó trong Google Cloud Console. `APP_PUBLIC_URL` phải là origin frontend tương ứng.
+Đặt `APP_PUBLIC_URL` bằng origin frontend đang mở. Nếu để trống `GOOGLE_REDIRECT_URI`, backend tự dùng `APP_PUBLIC_URL` + `/api/v1/auth/oauth2/callback/google`. Với demo port `13000`, thêm Authorized redirect URI `http://localhost:13000/api/v1/auth/oauth2/callback/google`; nếu chạy frontend trực tiếp trên port `3000`, dùng `http://localhost:3000/api/v1/auth/oauth2/callback/google`. URL phải khớp chính xác, kể cả hostname và port, theo [hướng dẫn OAuth của Google](https://developers.google.com/identity/protocols/oauth2/web-server#redirect-uri). Khi chạy backend trực tiếp ngoài Compose, `run-service.ps1` truyền `APP_PUBLIC_URL` sang `FRONTEND_BASE_URL`; nếu tự chạy Java, cần đặt `FRONTEND_BASE_URL` tương ứng.
+
+Sau khi đổi credentials hoặc URL trong `.env`, chạy `docker compose --profile apps up -d --no-deps --force-recreate identity-service` để container nhận cấu hình mới. Với `start-apps.ps1 -PublicUrl`, script đồng bộ callback và cookie với URL được chọn; khai báo callback đó trong Google Cloud Console trước khi dùng. Nếu không truyền `-PublicUrl`, các giá trị callback/cookie đã điền trong `.env` được giữ nguyên; giá trị còn trống được suy ra từ URL frontend. Không cần bật Gmail API. OAuth chỉ dùng OpenID Connect (`openid`, `profile`, `email`); API của SportHub tiếp tục dùng JWT/refresh token riêng. Đăng ký Google tạo tài khoản Customer; tài khoản đã xác minh cùng email được liên kết theo quy tắc hiện tại.
+
+Với deployment, đặt `APP_PUBLIC_URL` thành origin HTTPS public có proxy `/api/v1/*` tới Gateway, ví dụ `https://sporthub.example.com`, và `SECURE_COOKIE=true`. Có thể đặt `GOOGLE_REDIRECT_URI` riêng nếu cần; callback phải cùng origin frontend và được khai báo chính xác trong Google Cloud Console.
 
 ### Google Maps cho vị trí cơ sở
 
@@ -104,6 +108,8 @@ Compose mặc định chỉ khởi động infrastructure. Để tạo cấu hì
 Script build image tuần tự để dùng chung cache Maven; chỉ dừng JVM demo thuộc checkout này khi chuyển sang container. `.env` có sẵn được giữ nguyên. Mặc định demo: frontend `http://localhost:13000`, Gateway `http://localhost:18080`. `start-apps.ps1` đồng bộ public links và CORS với port frontend; `-PublicUrl` hỗ trợ một địa chỉ demo khác. Email xác minh, đặt lại mật khẩu và thông báo cần một SMTP server được cấu hình; SMS demo tắt mặc định.
 
 Tài khoản seed: `customer`, `customer2`, `owner`, `staff`, `admin` tại `@sporthub.local`; mật khẩu là `DEMO_PASSWORD` trong `.env`. Seed chỉ bật trong local/demo. Payment demo không chuyển tiền thật; escrow/refund không tự chọn chính sách.
+
+Để thêm dữ liệu trình diễn cho các màn hình chính sau khi application đã chạy, dùng `python3 scripts/demo/seed-showcase.py` từ repository root. Script tạo cơ sở cho đủ 4 bộ môn, booking/payment, nhóm chơi, chuyển nhượng và hồ sơ chờ duyệt; xem [hướng dẫn dữ liệu demo](docs/demo-data.md). Kết quả và đường dẫn màn hình được ghi vào `tmp/demo/showcase-summary.md`.
 
 ## Frontend
 

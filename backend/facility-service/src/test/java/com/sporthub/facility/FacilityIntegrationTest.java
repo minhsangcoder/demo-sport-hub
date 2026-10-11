@@ -119,6 +119,24 @@ class FacilityIntegrationTest {
   assertThatThrownBy(()->jdbc.update("UPDATE facility_reviews SET snapshot='{}'::jsonb WHERE id=?",second.id())).isInstanceOf(org.springframework.dao.DataAccessException.class);
   assertThatThrownBy(()->jdbc.update("DELETE FROM facility_audit WHERE facility_id=?",f.id())).isInstanceOf(org.springframework.dao.DataAccessException.class);
  }
+ @Test void rejectedFacilityPersistsDecisionKeepsSnapshotAndPublishesOnce() throws Exception {
+  var owner=owner();var admin=new Caller(UUID.randomUUID(),"Admin",Set.of("ADMIN"),Map.of());
+  var facility=service.create(input("Rejected facility "+UUID.randomUUID()),owner);
+  service.createCourt(facility.id(),new CourtInput("REJECT","Review court",service.categories().getFirst().id(),null,true),owner);
+  org.mockito.Mockito.when(reviewDependencies.hours(facility.id(),"Bearer test")).thenReturn(json.readTree("[{\"dayOfWeek\":1,\"opensAt\":\"06:00\",\"closesAt\":\"22:00\"}]"));
+  var submitted=reviews.submit(facility.id(),owner,"Bearer test");
+  String reason="The submitted location documents require correction";
+  assertThat(reviews.decide(facility.id(),"REJECT",reason,admin).status()).isEqualTo("REJECTED");
+  var rejected=reviews.reviews(facility.id()).getFirst();
+  assertThat(rejected.state()).isEqualTo("REJECTED");assertThat(rejected.reviewedBy()).isEqualTo(admin.id());
+  assertThat(rejected.reviewedAt()).isNotNull();assertThat(rejected.reason()).isEqualTo(reason);
+  assertThat(rejected.snapshot()).isEqualTo(submitted.snapshot());
+  assertThatThrownBy(()->service.publicDetail(facility.id())).isInstanceOf(ResourceNotFoundException.class);
+  assertThatThrownBy(()->service.update(facility.id(),input("Changed rejected facility"),owner)).isInstanceOf(ConflictException.class);
+  assertThatThrownBy(()->reviews.decide(facility.id(),"REJECT",reason,admin)).isInstanceOf(ConflictException.class);
+  var events=jdbc.queryForList("SELECT body::text FROM event_outbox WHERE body->>'aggregateId'=?",String.class,facility.id().toString());
+  assertThat(events).hasSize(1);assertThat(json.readTree(events.getFirst()).path("payload").path("state").asText()).isEqualTo("REJECTED");
+ }
  @Test void privateReviewDocumentsRejectPublicAndForeignAccess(){
   var owner=owner();var f=service.create(input("Private documents "+UUID.randomUUID()),owner);UUID doc=UUID.randomUUID();jdbc.update("INSERT INTO facility_documents(id,facility_id,name,object_key,content_type,size_bytes) VALUES(?,?,? ,?,'application/pdf',100)",doc,f.id(),"Lease.pdf","private/test/"+doc);
   assertThatThrownBy(()->documents.list(f.id(),owner())).isInstanceOf(ForbiddenException.class);

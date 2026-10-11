@@ -7,6 +7,7 @@ foreach($demoEnvLine in [IO.File]::ReadAllLines((Join-Path $demoRepositoryRoot '
 }
 $demoPorts=@{'api-gateway'=18080;'identity-service'=18081;'facility-service'=18082;'schedule-service'=18083;'booking-service'=18084;'payment-service'=18085;'transfer-service'=18086}
 $env:SERVER_PORT=[string]$demoPorts[$Service]
+if($env:APP_PUBLIC_URL){$env:FRONTEND_BASE_URL=$env:APP_PUBLIC_URL}
 $env:IDENTITY_SERVICE_URL='http://localhost:18081'
 $env:FACILITY_SERVICE_URL='http://localhost:18082'
 $env:SCHEDULE_SERVICE_URL='http://localhost:18083'
