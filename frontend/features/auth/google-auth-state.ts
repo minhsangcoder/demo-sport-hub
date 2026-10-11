@@ -6,7 +6,8 @@ export function postLoginPath(value: string | null): string {
   const base = 'https://sporthub.local'
   try {
     const target = new URL(value, base)
-    return target.origin === base ? `${target.pathname}${target.search}${target.hash}` : fallbackPath
+    if (target.origin !== base || target.pathname.startsWith('//')) return fallbackPath
+    return `${target.pathname}${target.search}${target.hash}`
   } catch {
     return fallbackPath
   }

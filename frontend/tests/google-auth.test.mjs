@@ -117,6 +117,15 @@ test('Google callback still completes when browser storage is blocked', async ()
   assert.deepEqual(callback.errors, [])
 })
 
+test('Google callback rejects stored paths that normalize to protocol-relative URLs', async () => {
+  const callback = callbackHarness(storageWith('/customer/..//evil.example/'))
+  callback.setup()
+  await callback.finish()
+
+  assert.deepEqual(callback.redirects, [fallbackPath])
+  assert.deepEqual(callback.errors, [])
+})
+
 test('Failed refresh reports an error only for the active callback effect', async () => {
   const callback = callbackHarness(storageWith('/bookings'))
   callback.setup()()
@@ -153,6 +162,11 @@ test('Post-login destinations reject paths that normalize to another origin', ()
     '/\t/evil.example/',
     '/\n/evil.example/',
     '/\r/evil.example/',
+    '/customer/..//evil.example/',
+    '/%2e//evil.example/',
+    '/customer/%2e%2e//evil.example/',
+    '/customer/..///evil.example/',
+    '/customer/..//evil.example/bookings?tab=upcoming#today',
     'javascript:alert(1)',
   ]) {
     assert.equal(postLoginPath(candidate), fallbackPath, JSON.stringify(candidate))
