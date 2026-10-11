@@ -13,10 +13,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[2]
-ZONE = ZoneInfo("Asia/Ho_Chi_Minh")
+# Modern Vietnamese demo dates use UTC+07; avoid requiring an IANA database on Windows.
+ZONE = timezone(timedelta(hours=7), name="Asia/Ho_Chi_Minh")
 MARKER = "Bộ dữ liệu SportHub Showcase."
 PERMISSIONS = ["BOOKING_READ", "BOOKING_CREATE_COUNTER", "BOOKING_CHECK_IN",
                "BOOKING_COMPLETE", "SCHEDULE_READ"]
@@ -52,7 +52,7 @@ VENUES = [
 
 def load_env():
     values = {}
-    for line in (ROOT / ".env").read_text().splitlines():
+    for line in (ROOT / ".env").read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             key, value = line.split("=", 1)
@@ -136,7 +136,7 @@ class Api:
 class Showcase:
     def __init__(self, api, manifest_path, anchor):
         self.api, self.path = api, manifest_path
-        self.data = json.loads(self.path.read_text()) if self.path.exists() else {
+        self.data = json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {
             "version": 1, "facilities": {}, "applications": {}, "scenarios": {},
         }
         self.anchor = anchor or date.fromisoformat(
@@ -145,14 +145,14 @@ class Showcase:
         self.data.update(date=self.anchor.isoformat(), apiBase=api.base)
         self.categories = {c["name"]: c["id"] for c in api.get("/sport-categories") if c["active"]}
         self.provinces = json.loads(
-            (ROOT / "frontend/features/facility/vietnam-administrative-divisions.json").read_text()
+            (ROOT / "frontend/features/facility/vietnam-administrative-divisions.json").read_text(encoding="utf-8")
         )["provinces"]
         self.save()
 
     def save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         pending = self.path.with_suffix(".pending.json")
-        pending.write_text(json.dumps(self.data, indent=2, ensure_ascii=False) + "\n")
+        pending.write_text(json.dumps(self.data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         pending.replace(self.path)
 
     def facility_input(self, spec, index):
@@ -502,6 +502,18 @@ class Showcase:
         self.api.request("POST", f"/bookings/{booking['id']}/check-in", {"token": detail["checkinToken"]}, "staff")
         print("Live Staff check-in scenario ready", flush=True)
 
+    def admin_records(self, path, field, identifiers):
+        records = {r["id"]: r for r in self.api.get(path, "admin") if r["id"] in identifiers}
+        # Monitoring lists contain only the latest 200 records; look up older fixtures individually.
+        for identifier in sorted(identifiers - records.keys()):
+            try:
+                records[identifier] = self.api.get(path + "/" + identifier, "admin")[field]
+            except ApiError as error:
+                if error.status == 404:
+                    raise RuntimeError("Some demo booking/payment records are missing") from None
+                raise
+        return list(records.values())
+
     def verify(self):
         if len(self.data["facilities"]) != len(VENUES) or len(self.data["applications"]) != 2:
             raise RuntimeError("The showcase seed has not finished; run it without --verify-only")
@@ -517,11 +529,9 @@ class Showcase:
             raise RuntimeError("Demo discovery has missing courts, prices or available slots")
         booking_ids = {r["bookingId"] for k, r in self.data["scenarios"].items()
                        if k.startswith(self.anchor.isoformat() + "/") and r.get("bookingId")}
-        bookings = [b for b in self.api.get("/admin/bookings", "admin") if b["id"] in booking_ids]
+        bookings = self.admin_records("/admin/bookings", "booking", booking_ids)
         payment_ids = {r["paymentId"] for r in self.data["scenarios"].values() if r.get("paymentId")}
-        payments = [p for p in self.api.get("/admin/payments", "admin") if p["id"] in payment_ids]
-        if len(bookings) != len(booking_ids) or len(payments) != len(payment_ids):
-            raise RuntimeError("Some demo booking/payment records are missing")
+        payments = self.admin_records("/admin/payments", "payment", payment_ids)
         groups = [self.api.get("/groups/" + r["groupId"], r["actor"])
                   for k, r in self.data["scenarios"].items()
                   if k.startswith(self.anchor.isoformat() + "/") and r.get("groupId")]
@@ -604,7 +614,7 @@ class Showcase:
         ]
         for application in self.data["applications"].values():
             lines.append(f"- [{application['facilityName']}]({base}/admin/owner-applications/{application['id']}): {application['state']}")
-        (self.path.parent / "showcase-summary.md").write_text("\n".join(lines) + "\n")
+        (self.path.parent / "showcase-summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def demo_pdf(title, venue):
@@ -634,8 +644,8 @@ def seed_customers():
     result = subprocess.run(
         ["docker", "compose", "exec", "-T", "postgres", "sh", "-c",
          'exec psql -U "$POSTGRES_USER" -d identity_db -v ON_ERROR_STOP=1'],
-        input=(ROOT / "scripts/demo/showcase-customers.sql").read_text(),
-        text=True, capture_output=True, cwd=ROOT,
+        input=(ROOT / "scripts/demo/showcase-customers.sql").read_text(encoding="utf-8"),
+        text=True, encoding="utf-8", capture_output=True, cwd=ROOT,
     )
     if result.returncode:
         raise RuntimeError("Demo customer fixtures failed: " + result.stderr.strip())
