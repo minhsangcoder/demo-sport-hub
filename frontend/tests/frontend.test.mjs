@@ -1,0 +1,331 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import vm from "node:vm";
+import ts from "typescript";
+import { webcrypto } from "node:crypto";
+import { fileURLToPath } from "node:url";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+function load(file, extra = {}) {
+  const exports = {};
+  const context = vm.createContext({
+    exports,
+    module: { exports },
+    console,
+    URL,
+    URLSearchParams,
+    Headers,
+    Response,
+    Request,
+    FormData,
+    Blob,
+    Buffer,
+    Uint8Array,
+    AbortSignal,
+    crypto: webcrypto,
+    process: { env: {} },
+    fetch: async () => {
+      throw Error("Unexpected network request");
+    },
+    ...extra,
+  });
+  const source = fs.readFileSync(path.join(__dirname, "..", file), "utf8");
+  vm.runInContext(
+    ts.transpileModule(source, {
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2022,
+      },
+    }).outputText,
+    context,
+  );
+  return exports;
+}
+const selection = load("src/lib/selection.ts");
+const routes = load("src/lib/routes.ts");
+const domain = load("src/lib/domain.ts");
+test("labels preserve arbitrary user strings and money preserves fractional wire values", () => {
+  assert.equal(domain.label("constructor"), "constructor");
+  assert.equal(domain.label("__proto__"), "__proto__");
+  assert.equal(domain.label("PAST_SLOT"), "Đã qua giờ");
+  assert.match(domain.money(100000.5), /100\.000,5/);
+});
+const slot = (hour, state = "AVAILABLE", amount = 100000) => ({
+  startsAt: `2026-10-13T${hour}:00:00Z`,
+  endsAt: `2026-10-13T${String(Number(hour) + 1).padStart(2, "0")}:00:00Z`,
+  state,
+  amount,
+});
+test("continuous available slots preserve server interval and accept reverse click order", () => {
+  const a = slot("06"),
+    b = slot("07");
+  const result = selection.selectedInterval([a, b], [b.startsAt, a.startsAt]);
+  assert.equal(result.startsAt, a.startsAt);
+  assert.equal(result.endsAt, b.endsAt);
+});
+test("selection rejects gaps, unavailable states, absent prices and stale ids", () => {
+  for (const state of ["BOOKED", "HELD", "BLOCKED", "MAINTENANCE"]) {
+    const a = slot("06", state);
+    assert.equal(selection.selectedInterval([a], [a.startsAt]), null);
+  }
+  const a = slot("06"),
+    c = slot("08");
+  assert.equal(
+    selection.selectedInterval([a, c], [a.startsAt, c.startsAt]),
+    null,
+  );
+  assert.equal(
+    selection.selectedInterval([slot("06", "AVAILABLE", null)], [a.startsAt]),
+    null,
+  );
+  assert.equal(selection.selectedInterval([a], [a.startsAt, "missing"]), null);
+  assert.equal(selection.selectedInterval([a], [a.startsAt, a.startsAt]), null);
+});
+test("safe login continuation preserves group codes and prevents external redirects", () => {
+  assert.equal(
+    selection.safeNext("/customer/groups/join?code=one-time-code"),
+    "/customer/groups/join?code=one-time-code",
+  );
+  for (const value of [
+    null,
+    "https://example.com",
+    "//example.com",
+    "/\\example.com",
+    "/login?next=/",
+    "/register",
+    "/verify",
+    "/x\r\nLocation:evil",
+  ])
+    assert.equal(selection.safeNext(value), "/customer/bookings");
+});
+test("route grammar covers every workspace and rejects accidental or invented pages", () => {
+  const id = "11111111-2222-4333-8444-555555555555";
+  for (const p of [
+    "/",
+    "/search",
+    `/facilities/${id}/courts/${id}`,
+    `/customer/booking/holds/${id}`,
+    `/customer/groups/${id}/split`,
+    `/customer/transfers/acquisitions/${id}`,
+    `/owner/application/${id}/facility/schedule/preview`,
+    `/owner/facilities/${id}/maintenance`,
+    `/owner/bookings/${id}`,
+    `/staff/counter-booking/${id}`,
+    `/admin/owner-applications/${id}`,
+    "/admin/bookings/reconciliation",
+  ])
+    assert.equal(routes.isFrontendRoute(p), true, p);
+  for (const p of [
+    "/fake",
+    "/facilities/not-a-uuid",
+    "/owner/facilities/evil",
+    "/admin/facilities/lock",
+    "/api/v1/bookings",
+    "/customer/groups/join/extra",
+  ])
+    assert.equal(routes.isFrontendRoute(p), false, p);
+});
+const json = (data, status = 200) =>
+  Response.json({ data, message: "Success" }, { status });
+test("API unwraps real envelopes and preserves bearer auth and HttpOnly credentials", async () => {
+  const calls = [];
+  const api = load("src/lib/api.ts", {
+    fetch: async (url, options) => {
+      calls.push({ url, options });
+      return url.endsWith("/auth/login")
+        ? json({ accessToken: "access", user: { id: "u" } })
+        : json({ id: "real-record" });
+    },
+  });
+  await api.authApi.login("user@example.com", "credential");
+  const data = await api.api("/bookings");
+  assert.equal(data.id, "real-record");
+  assert.equal(calls[1].options.headers.get("Authorization"), "Bearer access");
+  assert.equal(calls[1].options.credentials, "include");
+  assert.equal(calls[1].options.cache, "no-store");
+  await api.api("/facilities");
+  assert.equal(calls[2].options.headers.has("Authorization"), false);
+});
+test("simultaneous expired requests use one refresh then retry with the new token", async () => {
+  let refreshes = 0,
+    retries = 0;
+  const api = load("src/lib/api.ts", {
+    fetch: async (url, options) => {
+      if (url.endsWith("/auth/refresh")) {
+        refreshes++;
+        await new Promise((r) => setTimeout(r, 15));
+        return json({ accessToken: "renewed", user: { id: "u" } });
+      }
+      if (options.headers.get("Authorization") === "Bearer renewed") {
+        retries++;
+        return json({ id: url });
+      }
+      return Response.json({ message: "Expired" }, { status: 401 });
+    },
+  });
+  await Promise.all([api.api("/bookings"), api.api("/groups")]);
+  assert.equal(refreshes, 1);
+  assert.equal(retries, 2);
+});
+test("expired refresh stops retries and exposes a real authentication error", async () => {
+  let calls = 0;
+  const api = load("src/lib/api.ts", {
+    fetch: async () => {
+      calls++;
+      return Response.json(
+        { message: "Session expired", code: "UNAUTHORIZED" },
+        { status: 401 },
+      );
+    },
+  });
+  await assert.rejects(
+    api.api("/bookings"),
+    (e) => e.status === 401 && e.code === "UNAUTHORIZED",
+  );
+  assert.equal(calls, 2);
+});
+test("multipart request lets fetch generate the boundary and retains idempotency", async () => {
+  let options;
+  const api = load("src/lib/api.ts", {
+    fetch: async (_, o) => {
+      options = o;
+      return json({ id: "document" }, 201);
+    },
+  });
+  const body = new FormData();
+  body.set(
+    "file",
+    new Blob(["file"], { type: "application/pdf" }),
+    "legal.pdf",
+  );
+  await api.api("/owner/facilities/id/documents", {
+    method: "POST",
+    headers: { "Idempotency-Key": "stable-intent" },
+    body,
+  });
+  assert.equal(options.headers.has("Content-Type"), false);
+  assert.equal(options.headers.get("Idempotency-Key"), "stable-intent");
+  assert.equal(options.body, body);
+});
+test("API distinguishes empty deletion, field validation, connectivity and invalid responses", async () => {
+  const responses = [
+    new Response(null, { status: 204 }),
+    Response.json(
+      {
+        message: "Invalid",
+        code: "VALIDATION_ERROR",
+        fieldErrors: [{ field: "name", message: "Required" }],
+      },
+      { status: 400 },
+    ),
+    new Response("bad gateway", { status: 200 }),
+  ];
+  const api = load("src/lib/api.ts", { fetch: async () => responses.shift() });
+  assert.equal(
+    await api.api("/owner/maintenance/id", { method: "DELETE" }),
+    undefined,
+  );
+  await assert.rejects(
+    api.api("/owner/facilities", { method: "POST", body: "{}" }),
+    (e) => e.status === 400 && e.fieldErrors[0].field === "name",
+  );
+  await assert.rejects(api.api("/bookings"), (e) => e.status === 502);
+  const offline = load("src/lib/api.ts", {
+    fetch: async () => {
+      throw Error("offline");
+    },
+  });
+  await assert.rejects(offline.api("/bookings"), (e) => e.status === 0);
+});
+const request = (url, options = {}) =>
+  Object.assign(new Request(url, options), { nextUrl: new URL(url) });
+const routeContext = {
+  params: Promise.resolve({ segments: ["auth", "refresh"] }),
+};
+test("gateway proxy rejects cross-origin writes before contacting services", async () => {
+  let calls = 0;
+  const proxy = load("app/api/v1/[...segments]/route.ts", {
+    fetch: async () => {
+      calls++;
+      return json(null);
+    },
+  });
+  for (const headers of [
+    { origin: "https://evil.example", host: "localhost:3000" },
+    { "sec-fetch-site": "cross-site", host: "localhost:3000" },
+    { origin: "null", host: "localhost:3000" },
+  ]) {
+    const r = await proxy.POST(
+      request("http://localhost:3000/api/v1/auth/refresh", {
+        method: "POST",
+        headers,
+      }),
+      routeContext,
+    );
+    assert.equal(r.status, 403);
+  }
+  assert.equal(calls, 0);
+});
+test("gateway proxy preserves auth, query, statuses and refresh cookies without forwarding browser Origin", async () => {
+  let forwarded;
+  const proxy = load("app/api/v1/[...segments]/route.ts", {
+    process: { env: { GATEWAY_URL: "http://gateway:8080" } },
+    fetch: async (url, options) => {
+      forwarded = { url: String(url), options };
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "set-cookie":
+            "refresh=opaque; HttpOnly; Path=/api/v1/auth; SameSite=Lax",
+        },
+      });
+    },
+  });
+  const r = await proxy.POST(
+    request("http://localhost:3000/api/v1/auth/refresh?device=one", {
+      method: "POST",
+      headers: {
+        host: "localhost:3000",
+        origin: "http://localhost:3000",
+        cookie: "refresh=old",
+        authorization: "Bearer access",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "one",
+      },
+      body: "{}",
+    }),
+    routeContext,
+  );
+  assert.equal(r.status, 204);
+  assert.equal(
+    forwarded.url,
+    "http://gateway:8080/api/v1/auth/refresh?device=one",
+  );
+  assert.equal(forwarded.options.headers.get("cookie"), "refresh=old");
+  assert.equal(forwarded.options.headers.get("authorization"), "Bearer access");
+  assert.equal(forwarded.options.headers.get("Idempotency-Key"), "one");
+  assert.equal(forwarded.options.headers.has("origin"), false);
+  assert.match(r.headers.get("set-cookie"), /HttpOnly/);
+  assert.equal(Buffer.from(forwarded.options.body).toString(), "{}");
+});
+test("gateway proxy enforces upload size and reports upstream failure", async () => {
+  const proxy = load("app/api/v1/[...segments]/route.ts");
+  const big = await proxy.POST(
+    request("http://localhost:3000/api/v1/auth/register", {
+      method: "POST",
+      headers: {
+        host: "localhost:3000",
+        "content-length": String(32 * 1024 * 1024),
+      },
+      body: "x",
+    }),
+    routeContext,
+  );
+  assert.equal(big.status, 413);
+  const failed = await proxy.GET(
+    request("http://localhost:3000/api/v1/auth/refresh"),
+    routeContext,
+  );
+  assert.equal(failed.status, 502);
+});
