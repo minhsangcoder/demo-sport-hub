@@ -19,7 +19,7 @@ public class GroupRefundConsumer {
     @Transactional public void apply(JsonNode event) {
         if(!event.path("producer").asText().equals("booking-service")||!event.path("eventType").asText().equals("booking.group.refund.requested")||event.path("eventVersion").asInt()!=1)
             throw new AmqpRejectAndDontRequeueException("Unsupported group refund event");
-        var body=event.path("payload");UUID payment,payer,booking,eventId;
+        var body=event.path("payload");if(!body.path("reason").isTextual()||body.path("reason").asText().isBlank()||body.path("reason").asText().length()>500)throw new AmqpRejectAndDontRequeueException("Valid refund review reason is required");UUID payment,payer,booking,eventId;
         try{payment=UUID.fromString(body.path("paymentId").asText());payer=UUID.fromString(body.path("payerId").asText());booking=UUID.fromString(body.path("bookingId").asText());eventId=UUID.fromString(event.path("eventId").asText());}
         catch(Exception ex){throw new AmqpRejectAndDontRequeueException("Invalid group refund reference",ex);}
         repo.lock(payment);var order=repo.find(payment);
@@ -28,6 +28,6 @@ public class GroupRefundConsumer {
         if(repo.jdbc().update("INSERT INTO event_inbox(consumer,event_id) VALUES('group-refund-review',?) ON CONFLICT DO NOTHING",eventId)==0)return;
         String key="group-review:"+payment;
         // Disputed financial policy remains isolated. Refund amount and execution await an approved strategy.
-        repo.jdbc().update("INSERT INTO refunds(id,payment_id,requester_id,reason,state,idempotency_key) VALUES(?,?,?,?,'BLOCKED_RULE',?) ON CONFLICT(requester_id,idempotency_key) DO NOTHING",UUID.randomUUID(),payment,payer,body.path("reason").asText(),key);
+        repo.jdbc().update("INSERT INTO refunds(id,payment_id,requester_id,reason,state,idempotency_key,beneficiary_id) VALUES(?,?,?,?,'BLOCKED_RULE',?,?) ON CONFLICT(requester_id,idempotency_key) DO NOTHING",UUID.randomUUID(),payment,payer,body.path("reason").asText(),key,payer);
     }
 }

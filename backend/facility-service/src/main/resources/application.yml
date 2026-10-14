@@ -31,6 +31,8 @@ spring:
       max-file-size: 10MB
       max-request-size: 11MB
 sporthub:
+  configuration-changes:
+    source: facility
   events:
     outbox:
       enabled: true

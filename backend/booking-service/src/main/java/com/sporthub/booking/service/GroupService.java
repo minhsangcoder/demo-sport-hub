@@ -21,7 +21,9 @@ import java.util.*;
 @Service @Transactional(readOnly=true)
 public class GroupService {
     private final BookingRepository repo;
+    private final PlayGroupMembership playMembership;
     private final BookingService bookings;
+    private final BookingLifecycle lifecycle;
     private final GroupExpiration expiration;
     private final CheckinQr qr;
     private final Clock clock;
@@ -31,18 +33,23 @@ public class GroupService {
     private final String publicAppUrl;
     private final int deadlineSeconds,minLeadSeconds;
     public GroupService(BookingRepository repo,BookingService bookings,GroupExpiration expiration,CheckinQr qr,Clock clock,
-        GroupReminderPolicy reminderPolicy,ObjectProvider<ReliableOutbox> outbox,
+        GroupReminderPolicy reminderPolicy,ObjectProvider<ReliableOutbox> outbox,BookingLifecycle lifecycle,PlayGroupMembership playMembership,
         @Value("${JWT_SECRET}") String secret,@Value("${booking.group.deadline-seconds:1800}") int deadlineSeconds,
         @Value("${booking.group.min-lead-seconds:7200}") int minLeadSeconds,@Value("${APP_PUBLIC_URL:http://localhost:3000}") String publicAppUrl) {
         if(deadlineSeconds<60||minLeadSeconds<deadlineSeconds)throw new IllegalArgumentException("Group deadline must fit inside minimum booking lead time");
-        this.repo=repo;this.bookings=bookings;this.expiration=expiration;this.qr=qr;this.clock=clock;
+        this.playMembership=playMembership;this.repo=repo;this.bookings=bookings;this.lifecycle=lifecycle;this.expiration=expiration;this.qr=qr;this.clock=clock;
         this.reminderPolicy=reminderPolicy;this.outbox=outbox;
         this.secret=secret;this.deadlineSeconds=deadlineSeconds;this.minLeadSeconds=minLeadSeconds;this.publicAppUrl=publicAppUrl.replaceAll("/+$","");
     }
     @Transactional public Group create(CreateGroup input,String key,Caller caller,String token) {
+        return createInternal(input,key,caller,token,null);
+    }
+    @Transactional public Group createForReuse(CreateGroup input,String key,Caller caller,String token,UUID root){return createInternal(input,key,caller,token,root);}
+    private Group createInternal(CreateGroup input,String key,Caller caller,String token,UUID root) {
         caller.requireRole("CUSTOMER");checkKey(key);repo.lock(caller.id());
-        String fingerprint=Signatures.sha256(repo.write(input));
-        var prior=repo.jdbc().queryForList("SELECT fingerprint,resource_id FROM request_idempotency WHERE actor_id=? AND operation='GROUP' AND key=?",caller.id(),key);
+        String operation=root==null?"GROUP":"GROUP_REUSE";
+        String fingerprint=Signatures.sha256(repo.write(root==null?input:Map.of("group",input,"playGroupId",root)));
+        var prior=repo.jdbc().queryForList("SELECT fingerprint,resource_id FROM request_idempotency WHERE actor_id=? AND operation=? AND key=?",caller.id(),operation,key);
         if(!prior.isEmpty()) {
             if(!prior.get(0).get("fingerprint").equals(fingerprint))throw new ConflictException("Group key was used with different input");
             return load((UUID)prior.get(0).get("resource_id"));
@@ -50,14 +57,19 @@ public class GroupService {
         var hold=bookings.ownHold(input.holdId(),caller);
         if(hold.startsAt().isBefore(clock.instant().plusSeconds(minLeadSeconds)))
             throw new ConflictException("Group booking requires at least "+minLeadSeconds/3600+" hours before play");
-        var booking=bookings.create(new CreateInput(hold.id(),null,null),Signatures.sha256("GROUP|"+key),caller,token,false);
-        Instant deadline=clock.instant().plusSeconds(deadlineSeconds);
+        var booking=bookings.create(new CreateInput(hold.id(),null,null),Signatures.sha256(root==null?"GROUP|"+key:"GROUP_REUSE|"+root+"|"+key),caller,token,false);
+        if(!booking.currency().equals("VND")||booking.amount().stripTrailingZeros().scale()>0)
+            throw new ConflictException("Group booking requires integral VND amounts; the price cannot be rounded");
+        Instant createdAt=clock.instant();
+        if(booking.startsAt().isBefore(createdAt.plusSeconds(minLeadSeconds)))
+            throw new ConflictException("Group minimum booking lead time elapsed during creation");
+        Instant deadline=createdAt.plusSeconds(deadlineSeconds).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         repo.jdbc().update("UPDATE slot_reservations SET expires_at=? WHERE id=?",Timestamp.from(deadline),hold.id());
         repo.jdbc().update("UPDATE bookings SET hold_expires_at=? WHERE id=?",Timestamp.from(deadline),booking.id());
         String name=input.name()==null||input.name().isBlank()?"Nhóm đặt sân":input.name().trim();
         repo.jdbc().update("INSERT INTO booking_groups(id,owner_id,name,state,deadline,max_members) VALUES(?,?,?,'GROUP_PENDING',?,?)",booking.id(),caller.id(),name,Timestamp.from(deadline),input.maxMembers());
-        addMember(booking.id(),caller);
-        repo.jdbc().update("INSERT INTO request_idempotency(actor_id,operation,key,fingerprint,resource_id) VALUES(?,'GROUP',?,?,?)",caller.id(),key,fingerprint,booking.id());
+        addMember(booking.id(),caller);playMembership.created(booking.id(),name,caller,root);
+        repo.jdbc().update("INSERT INTO request_idempotency(actor_id,operation,key,fingerprint,resource_id) VALUES(?,?,?,?,?)",caller.id(),operation,key,fingerprint,booking.id());
         repo.history(booking.id(),caller.id(),"GROUP_CREATED",Map.of("deadline",deadline));return load(booking.id());
     }
     public List<Group> mine(Caller caller) {
@@ -68,32 +80,59 @@ public class GroupService {
     public Invite invite(UUID id,Caller caller) {
         var group=load(id);owner(group,caller);pending(group);
         if(group.allocationsLocked())throw new ConflictException("Membership has been finalized");
-        String raw=id+"|"+group.deadline().getEpochSecond();
+        if(group.members().size()>=group.maxMembers())throw new ConflictException("Group is full");
+        return invitationCode(group);
+    }
+    @Transactional public Invite regenerateInvite(UUID id,Caller caller) {
+        lock(id);var group=load(id);owner(group,caller);pending(group);
+        if(group.allocationsLocked()||group.members().size()>=group.maxMembers())throw new ConflictException("Group is full or membership has been finalized");
+        mutable(group);
+        repo.jdbc().update("UPDATE booking_groups SET invite_version=invite_version+1 WHERE id=?",id);
+        repo.history(id,caller.id(),"GROUP_INVITATION_REGENERATED",Map.of());
+        return invitationCode(group);
+    }
+    private Invite invitationCode(Group group) {
+        long version=repo.jdbc().queryForObject("SELECT invite_version FROM booking_groups WHERE id=?",Long.class,group.id());
+        String raw=group.id()+"|"+group.deadline().getEpochSecond()+"|"+version;
         String code=Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8))+"."+Signatures.hmac(secret,"GROUP|"+raw);
         String path="/customer/groups/join?code="+code;
         return new Invite(code,path,qr.svg(publicAppUrl+path),qr.pngDataUrl(publicAppUrl+path),group.deadline());
     }
-    public Group invitation(String code,Caller caller) {caller.requireRole("CUSTOMER");var group=load(invitedId(code));pending(group);return group;}
+    public Group invitation(String code,Caller caller) {caller.requireRole("CUSTOMER");var group=load(invitedId(code));pending(group);if(group.members().stream().anyMatch(m->m.userId().equals(caller.id())))return group;var members=group.members().stream().map(m->new Member(m.id(),m.userId(),m.displayName(),m.active(),null,null,null,null,null,null,false,"MEMBERSHIP_REQUIRED")).toList();return new Group(group.id(),group.ownerId(),group.name(),group.state(),group.deadline(),group.maxMembers(),group.allocationsLocked(),group.booking(),members,null,"INVITATION_PREVIEW");}
     @Transactional public Group join(JoinGroup input,Caller caller) {
-        caller.requireRole("CUSTOMER");UUID id=invitedId(input.code());lock(id);var group=load(id);pending(group);
+        caller.requireRole("CUSTOMER");UUID id=invitedId(input.code());lock(id);
+        // Revalidate after waiting for regeneration/cancellation to commit under the court lock.
+        invitedId(input.code());var group=load(id);pending(group);
         if(group.members().stream().anyMatch(m->m.active()&&m.userId().equals(caller.id())))return group;
         if(group.allocationsLocked()||group.members().size()>=group.maxMembers())throw new ConflictException("Group is full or membership has been finalized");
         var former=repo.jdbc().queryForList("SELECT id FROM group_members WHERE group_id=? AND user_id=?",id,caller.id());
         if(former.isEmpty())addMember(id,caller);
         else repo.jdbc().update("UPDATE group_members SET active=TRUE,display_name=? WHERE id=?",caller.fullName(),former.get(0).get("id"));
-        repo.history(id,caller.id(),"GROUP_MEMBER_JOINED",Map.of());return load(id);
+        playMembership.joined(id,caller);repo.history(id,caller.id(),"GROUP_MEMBER_JOINED",Map.of());return load(id);
     }
     @Transactional public Group leave(UUID id,Caller caller) {
         lock(id);var group=load(id);pending(group);var member=member(group,caller);
         if(group.ownerId().equals(caller.id()))throw new ConflictException("Booking Owner must cancel the group instead");
         mutable(group);
         repo.jdbc().update("UPDATE group_members SET active=FALSE WHERE id=?",member.id());resetAllocation(id);
-        repo.history(id,caller.id(),"GROUP_MEMBER_LEFT",Map.of());return load(id);
+        playMembership.exited(id,caller.id(),caller.id());repo.history(id,caller.id(),"GROUP_MEMBER_LEFT",Map.of());return load(id);
+    }
+    @Transactional public Group remove(UUID id,UUID memberId,Caller caller) {
+        lock(id);var group=load(id);owner(group,caller);pending(group);mutable(group);
+        var rows=repo.jdbc().queryForList("SELECT user_id,active FROM group_members WHERE id=? AND group_id=?",memberId,id);
+        if(rows.isEmpty())throw new ResourceNotFoundException("Group member not found");
+        if(rows.getFirst().get("user_id").equals(group.ownerId()))throw new ConflictException("Booking Owner must cancel the group instead");
+        if(!(Boolean)rows.getFirst().get("active"))return group;
+        repo.jdbc().update("UPDATE group_members SET active=FALSE WHERE id=?",memberId);resetAllocation(id);
+        // Removing someone also retires the shared code they possess. The owner can share the new code.
+        repo.jdbc().update("UPDATE booking_groups SET invite_version=invite_version+1 WHERE id=?",id);
+        playMembership.exited(id,(UUID)rows.getFirst().get("user_id"),caller.id());repo.history(id,caller.id(),"GROUP_MEMBER_REMOVED",Map.of("memberId",memberId));return load(id);
     }
     @Transactional public Group split(UUID id,Split input,Caller caller) {
         lock(id);var group=load(id);owner(group,caller);pending(group);mutable(group);
         Map<UUID,BigDecimal> amounts=new HashMap<>();BigDecimal total=group.booking().amount();
         if(!group.booking().currency().equals("VND")||total.stripTrailingZeros().scale()>0)throw new ConflictException("Group split requires integral VND amounts");
+        if(!Set.of("EQUAL","CUSTOM").contains(input.mode()))throw new IllegalArgumentException("Unknown allocation mode");
         if(input.mode().equals("EQUAL")) {
             BigDecimal base=total.divide(BigDecimal.valueOf(group.members().size()),0,RoundingMode.DOWN);
             BigDecimal remainder=total.subtract(base.multiply(BigDecimal.valueOf(group.members().size())));
@@ -101,7 +140,7 @@ public class GroupService {
         } else {
             if(input.allocations()==null)throw new IllegalArgumentException("Custom allocations are required");
             for(var a:input.allocations()) {
-                if(a.amount().signum()<0||a.amount().stripTrailingZeros().scale()>0||amounts.put(a.memberId(),a.amount())!=null)
+                if(a==null||a.memberId()==null||a.amount()==null||a.amount().signum()<0||a.amount().stripTrailingZeros().scale()>0||amounts.put(a.memberId(),a.amount())!=null)
                     throw new IllegalArgumentException("Allocations must be unique, non-negative integral VND amounts");
             }
         }
@@ -117,6 +156,7 @@ public class GroupService {
         var member=group.members().stream().filter(m->m.id().equals(memberId)).findFirst().orElseThrow(()->new ResourceNotFoundException("Group member not found"));
         if(!member.userId().equals(caller.id())&&!group.ownerId().equals(caller.id()))throw new ForbiddenException("Only the member or Booking Owner may pay this contribution");
         if(!group.allocationsLocked()||member.amountDue().signum()<=0||member.amountPaid().signum()>0)throw new ConflictException("Contribution is not payable");
+        if(!lifecycle.hasLiveHold(group.booking(),clock.instant()))throw new ConflictException("Group no longer has a live payment hold");
         // Prevent an in-flight provider payment from racing a new allocation or member removal.
         repo.jdbc().update("UPDATE group_members SET payment_requested_at=COALESCE(payment_requested_at,?) WHERE id=?",Timestamp.from(clock.instant()),memberId);
         return new Payable(id,caller.id(),member.amountDue(),group.booking().currency(),group.deadline(),"GROUP_CONTRIBUTION",memberId);
@@ -126,8 +166,7 @@ public class GroupService {
         if(group.state().equals("GROUP_CANCELLED"))return group;
         pending(group);mutable(group);
         repo.jdbc().update("UPDATE booking_groups SET state='GROUP_CANCELLED' WHERE id=?",id);
-        repo.jdbc().update("UPDATE bookings SET status='CANCELLED',version=version+1,updated_at=NOW() WHERE id=?",id);
-        release(id);repo.history(id,caller.id(),"GROUP_CANCELLED",Map.of("reason",input.reason()));return load(id);
+        lifecycle.transition(group.booking(),"CANCELLED",caller.id(),"GROUP_CANCELLED",Map.of("reason",input.reason()),clock.instant(),null);return load(id);
     }
     /** Accept notices atomically under the same court lock as payment, expiry and membership. */
     @Transactional public ReminderResult remind(UUID id,PaymentReminders input,Caller caller) {
@@ -176,6 +215,7 @@ public class GroupService {
         if(member==null||(!member.userId().equals(payer)&&!group.ownerId().equals(payer)))reason="GROUP_PAYER_MISMATCH";
         else if(!group.allocationsLocked()||member.amountDue().compareTo(payload.path("amount").decimalValue())!=0||!group.booking().currency().equals(payload.path("currency").asText()))reason="GROUP_AMOUNT_MISMATCH";
         else if(!group.state().equals("GROUP_PENDING")||!group.booking().status().equals("PENDING")||!clock.instant().isBefore(group.deadline())||!paidAt.isBefore(group.deadline()))reason="GROUP_LATE_PAYMENT";
+        else if(!lifecycle.hasLiveHold(group.booking(),clock.instant()))reason="GROUP_RESERVATION_NOT_HELD";
         else if(member.amountPaid().signum()>0)reason="GROUP_DUPLICATE_CONTRIBUTION";
         if(reason!=null) {
             if(repo.jdbc().update("INSERT INTO payment_reconciliation(id,booking_id,payment_id,reason) VALUES(?,?,?,?) ON CONFLICT(payment_id) DO NOTHING",UUID.randomUUID(),id,payment,reason)>0)
@@ -187,15 +227,13 @@ public class GroupService {
         repo.history(id,payer,"GROUP_CONTRIBUTION_PAID",Map.of("paymentId",payment,"memberId",memberId,"amount",member.amountDue()));
         if(load(id).totalPaid().compareTo(group.booking().amount())==0) {
             repo.jdbc().update("UPDATE booking_groups SET state='CONFIRMED' WHERE id=?",id);
-            repo.jdbc().update("UPDATE bookings SET status='CONFIRMED',paid_at=?,checkin_token_version=checkin_token_version+1,version=version+1,updated_at=NOW() WHERE id=?",Timestamp.from(paidAt),id);
-            repo.jdbc().update("UPDATE slot_reservations SET state='BOOKED' WHERE id=(SELECT reservation_id FROM bookings WHERE id=?)",id);
-            repo.history(id,payer,"GROUP_CONFIRMED",Map.of("totalPaid",group.booking().amount()));
+            lifecycle.transition(group.booking(),"CONFIRMED",payer,"GROUP_CONFIRMED",Map.of("totalPaid",group.booking().amount()),paidAt,null);
         }
     }
     private Group load(UUID id) {
         var rows=repo.jdbc().queryForList("SELECT * FROM booking_groups WHERE id=?",id);
         if(rows.isEmpty())throw new ResourceNotFoundException("Group not found");var row=rows.get(0);
-        var booking=repo.find(id);Instant now=clock.instant();
+        var original=repo.find(id);var booking=new Booking(original.id(),original.facilityId(),original.courtId(),original.customerId(),original.currentHolderId(),original.createdBy(),original.startsAt(),original.endsAt(),original.status(),original.source(),original.guestName(),original.guestPhone(),original.amount(),original.currency(),original.priceSnapshot(),original.holdExpiresAt(),original.paymentId(),original.paidAt(),original.checkedInAt(),original.completedAt(),original.version(),original.checkinTokenVersion());Instant now=clock.instant();
         boolean open=reminderPolicy.windowOpen((String)row.get("state"),booking.status(),((Timestamp)row.get("deadline")).toInstant(),booking.endsAt(),now);
         var members=repo.jdbc().query("SELECT * FROM group_members WHERE group_id=? AND active ORDER BY joined_at,id",(r,n)->{
             Instant last=BookingRepository.instant(r,"last_reminder_at");
@@ -211,14 +249,19 @@ public class GroupService {
     private void pending(Group group){if(!group.state().equals("GROUP_PENDING")||!group.booking().status().equals("PENDING")||!clock.instant().isBefore(group.deadline()))throw new ConflictException("Group payment deadline has ended or group is no longer pending");}
     private void mutable(Group group){if(group.members().stream().anyMatch(m->m.amountPaid().signum()>0||m.paymentRequestedAt()!=null))throw new ConflictException("BLOCKED_RULE: membership or allocations cannot change after payment has started");}
     private void resetAllocation(UUID id){repo.jdbc().update("UPDATE group_members SET amount_due=0,amount_paid=0,payment_state='UNPAID' WHERE group_id=?",id);repo.jdbc().update("UPDATE booking_groups SET allocations_locked=FALSE WHERE id=?",id);}
-    private void release(UUID id){repo.jdbc().update("UPDATE slot_reservations SET state='RELEASED' WHERE id=(SELECT reservation_id FROM bookings WHERE id=?)",id);}
     private UUID invitedId(String code) {
         try {
             String[] parts=code.split("\\.");if(parts.length!=2)throw new IllegalArgumentException();
             String raw=new String(Base64.getUrlDecoder().decode(parts[0]),StandardCharsets.UTF_8);
             if(!Signatures.matches(Signatures.hmac(secret,"GROUP|"+raw),parts[1]))throw new IllegalArgumentException();
-            String[] fields=raw.split("\\|");if(fields.length!=2||!Instant.ofEpochSecond(Long.parseLong(fields[1])).isAfter(clock.instant()))throw new IllegalArgumentException();
-            return UUID.fromString(fields[0]);
+            String[] fields=raw.split("\\|");if((fields.length!=2&&fields.length!=3)||!Instant.ofEpochSecond(Long.parseLong(fields[1])).isAfter(clock.instant()))throw new IllegalArgumentException();
+            UUID id=UUID.fromString(fields[0]);
+            var rows=repo.jdbc().queryForList("SELECT invite_version,deadline FROM booking_groups WHERE id=?",id);
+            if(rows.isEmpty())throw new IllegalArgumentException();
+            long version=fields.length==2?0:Long.parseLong(fields[2]);
+            if(version!=((Number)rows.getFirst().get("invite_version")).longValue()
+                ||Long.parseLong(fields[1])!=((Timestamp)rows.getFirst().get("deadline")).toInstant().getEpochSecond())throw new IllegalArgumentException();
+            return id;
         } catch(Exception ex){throw new ForbiddenException("Group invitation is invalid or expired");}
     }
     private void checkKey(String key){if(key==null||!key.matches("[A-Za-z0-9_.:-]{1,100}"))throw new IllegalArgumentException("A valid Idempotency-Key is required");}

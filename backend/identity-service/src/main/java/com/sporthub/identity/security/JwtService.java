@@ -48,6 +48,7 @@ public class JwtService {
     public AuthenticatedUser parseAccessToken(String token) {
         Claims claims = Jwts.parser().verifyWith(key).build()
                 .parseSignedClaims(token).getPayload();
+        if (claims.getExpiration() == null) throw new IllegalArgumentException("Access token requires expiration");
         Set<Role> roles = new LinkedHashSet<>();
         Object rawRoles = claims.get("roles");
         if (rawRoles instanceof List<?> values) {

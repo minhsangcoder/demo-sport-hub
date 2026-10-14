@@ -15,4 +15,14 @@ class GatewayApplicationContextTest {
     void applicationContextStarts() {
         // Context startup is the assertion.
     }
+
+    @org.springframework.boot.test.web.server.LocalServerPort int port;
+    @Test void managementHandlersCannotBeReachedByAnonymousOrSpoofedAdminRequests() {
+        var client=org.springframework.test.web.reactive.server.WebTestClient.bindToServer().baseUrl("http://localhost:"+port).build();
+        for(var method:java.util.List.of(org.springframework.http.HttpMethod.GET,org.springframework.http.HttpMethod.POST,org.springframework.http.HttpMethod.DELETE)) {
+            client.method(method).uri("/actuator/gateway/routes").header("X-User-Role","ADMIN").exchange().expectStatus().isNotFound();
+        }
+        client.get().uri("/actuator/env").exchange().expectStatus().isNotFound();
+    }
+
 }

@@ -8,6 +8,7 @@ import { RequireAuth } from '@/features/auth/require-auth'
 import { Button } from '@/components/ui/button'
 import { money } from '@/features/schedule/types'
 import type { Payment,BookingDetail } from './types'
+import {PaymentSynchronization} from '@/features/integration/synchronization'
 import { Countdown } from './countdown'
 export function PaymentPage({id}:{id:string}){return <RequireAuth><Loaded id={id}/></RequireAuth>}
 function Loaded({id}:{id:string}){
@@ -18,6 +19,7 @@ function Loaded({id}:{id:string}){
  if(resource.error||!resource.data)return <p role="alert" className="p-8 text-red-700">{resource.error}</p>
  const p=resource.data;const resultPath=p.purpose==='TRANSFER'?`/customer/transfers/acquisitions/${p.acquisitionId}`:p.purpose==='GROUP_CONTRIBUTION'?`/customer/groups/${p.bookingId}`:`/customer/bookings/${p.bookingId}`
  return <div className="mx-auto max-w-xl px-5 py-10"><p className="text-sm font-bold text-amber-700">MÔI TRƯỜNG THANH TOÁN DEMO</p><h1 className="mt-4 text-3xl font-black">Thanh toán lượt đặt</h1><p className="mt-3 text-sm text-slate-500">Không phát sinh giao dịch tiền thật. Kết quả được xử lý qua backend.</p><section className="my-6 space-y-4 rounded-2xl border p-6"><p className="text-sm text-slate-500">Mã giao dịch <span className="break-all">{p.providerReference}</span></p><p className="text-3xl font-bold text-emerald-700">{money(p.amount,p.currency)}</p><p className="text-sm">Trạng thái: {p.status}</p>{p.status==='PENDING'&&<Countdown expiresAt={p.expiresAt}/>}</section>
+  {p.status==='SUCCESS'&&p.purpose!=='TRANSFER'&&<PaymentSynchronization id={id}/>}
   {error&&<p role="alert" className="mb-4 rounded-lg bg-red-50 p-4 text-sm text-red-700">{error}</p>}{waiting&&<p role="status" className="mb-4 text-emerald-700">Đã nhận thanh toán. Đang xác nhận booking…</p>}
   {p.status==='PENDING'&&<div className="grid gap-3"><Button className="h-12 bg-emerald-600 text-white" onClick={()=>complete('SUCCESS')} disabled={busy||waiting}>{busy?'Đang xử lý…':'Mô phỏng thanh toán thành công'}</Button><Button variant="outline" onClick={()=>complete('FAILED')} disabled={busy||waiting}>Mô phỏng giao dịch bị từ chối</Button></div>}
   {p.status==='SUCCESS'&&!waiting&&<Link href={resultPath} className="block rounded-full bg-emerald-600 p-3 text-center text-sm text-white">Xem kết quả đặt sân</Link>}{p.status==='FAILED'&&<Link className="text-emerald-700 underline" href={resultPath}>Xem giao dịch và thử lại</Link>}

@@ -28,6 +28,7 @@ public class ProfileService {
     private final ChallengeService challengeService;
     private final AuditService auditService;
     private final OtpCodeRepository otpRepository;
+    private final UserSecurityLock securityLock;
 
     public record ContactChallenge(UUID id, String channel, String recipient, Instant expiresAt,
                                    Instant resendAfter, boolean usable) {}
@@ -49,7 +50,8 @@ public class ProfileService {
             case "PHONE" -> OtpPurpose.PHONE_CHANGE;
             default -> throw new IdentityException(HttpStatus.BAD_REQUEST, "IDENTITY-VALIDATION", "Choose EMAIL or PHONE");
         };
-        User user = load(userId);
+        User user = securityLock.current(load(userId));
+        if(user.getStatus() != com.sporthub.identity.domain.AccountStatus.ACTIVE) throw new IdentityException(HttpStatus.FORBIDDEN,"IDENTITY-ACCOUNT-INACTIVE","Account is not active");
         String recipient = purpose == OtpPurpose.EMAIL_CHANGE ? user.getPendingEmail() : user.getPendingPhone();
         if (recipient == null) throw new IdentityException(HttpStatus.CONFLICT, "IDENTITY-CHANGE-NOT-PENDING", "No contact change is pending");
         checkContactCooldown(userId, purpose);
@@ -81,7 +83,8 @@ public class ProfileService {
                 && request.avatarUrl() == null && request.dateOfBirth() == null) {
             throw new IdentityException(HttpStatus.BAD_REQUEST, "IDENTITY-VALIDATION", "At least one profile field is required");
         }
-        User user = load(userId);
+        User user = securityLock.current(load(userId));
+        if(user.getStatus() != com.sporthub.identity.domain.AccountStatus.ACTIVE) throw new IdentityException(HttpStatus.FORBIDDEN,"IDENTITY-ACCOUNT-INACTIVE","Account is not active");
         UserProfile profile = user.getProfile();
         if (request.fullName() != null) profile.setFullName(request.fullName().trim());
         if (request.avatarUrl() != null) profile.setAvatarUrl(blankToNull(request.avatarUrl()));

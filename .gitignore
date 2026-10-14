@@ -1,3 +1,50 @@
+# Only application source and the configuration/tooling needed to run it.
+# Database schema/migrations/init scripts live under backend/ and stay included.
+/*
+!/.gitignore
+!/.gitattributes
+!/.env.example
+!/docker-compose.yml
+!/backend/
+!/frontend/
+!/contracts/
+!/scripts/
+
+# OpenAPI schemas are Backend source required by the API generation scripts.
+
+# Technical documents, reports and AI instructions stay local, even inside source trees.
+**/docs/
+**/*.md
+**/*.mdx
+**/*.doc
+**/*.docx
+**/*.pdf
+**/*.ppt
+**/*.pptx
+**/*.xls
+**/*.xlsx
+
+# Preserve attribution/licences for images and fonts required by the application.
+!/frontend/public/images/credits.md
+!/frontend/public/fonts/OFL.txt
+
+# scripts/ contains Backend/database launch, build, seed and test code.
+# Document-authoring helpers are not application source.
+/scripts/build-project-report.py
+
+# Runtime uploads, database backups and local data are not schema source.
+**/uploads/
+**/backups/
+**/dumps/
+*.dump
+*.backup
+*.bak
+*.sql.gz
+*.sql.zip
+*.db
+*.sqlite
+*.sqlite3
+
 # Environment and credentials
 .env
 .env.*

@@ -39,3 +39,7 @@ management:
 logging:
   level:
     com.sporthub: DEBUG
+
+sporthub:
+  configuration-changes:
+    source: schedule

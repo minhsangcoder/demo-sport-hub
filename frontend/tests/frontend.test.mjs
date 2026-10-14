@@ -130,7 +130,7 @@ const json = (data, status = 200) =>
   Response.json({ data, message: "Success" }, { status });
 test("API unwraps real envelopes and preserves bearer auth and HttpOnly credentials", async () => {
   const calls = [];
-  const api = load("src/lib/api.ts", {
+  const api = load("lib/api.ts", {
     fetch: async (url, options) => {
       calls.push({ url, options });
       return url.endsWith("/auth/login")
@@ -150,7 +150,7 @@ test("API unwraps real envelopes and preserves bearer auth and HttpOnly credenti
 test("simultaneous expired requests use one refresh then retry with the new token", async () => {
   let refreshes = 0,
     retries = 0;
-  const api = load("src/lib/api.ts", {
+  const api = load("lib/api.ts", {
     fetch: async (url, options) => {
       if (url.endsWith("/auth/refresh")) {
         refreshes++;
@@ -170,7 +170,7 @@ test("simultaneous expired requests use one refresh then retry with the new toke
 });
 test("expired refresh stops retries and exposes a real authentication error", async () => {
   let calls = 0;
-  const api = load("src/lib/api.ts", {
+  const api = load("lib/api.ts", {
     fetch: async () => {
       calls++;
       return Response.json(
@@ -187,7 +187,7 @@ test("expired refresh stops retries and exposes a real authentication error", as
 });
 test("multipart request lets fetch generate the boundary and retains idempotency", async () => {
   let options;
-  const api = load("src/lib/api.ts", {
+  const api = load("lib/api.ts", {
     fetch: async (_, o) => {
       options = o;
       return json({ id: "document" }, 201);
@@ -221,7 +221,7 @@ test("API distinguishes empty deletion, field validation, connectivity and inval
     ),
     new Response("bad gateway", { status: 200 }),
   ];
-  const api = load("src/lib/api.ts", { fetch: async () => responses.shift() });
+  const api = load("lib/api.ts", { fetch: async () => responses.shift() });
   assert.equal(
     await api.api("/owner/maintenance/id", { method: "DELETE" }),
     undefined,
@@ -231,7 +231,7 @@ test("API distinguishes empty deletion, field validation, connectivity and inval
     (e) => e.status === 400 && e.fieldErrors[0].field === "name",
   );
   await assert.rejects(api.api("/bookings"), (e) => e.status === 502);
-  const offline = load("src/lib/api.ts", {
+  const offline = load("lib/api.ts", {
     fetch: async () => {
       throw Error("offline");
     },
@@ -328,4 +328,27 @@ test("gateway proxy enforces upload size and reports upstream failure", async ()
     routeContext,
   );
   assert.equal(failed.status, 502);
+});
+
+
+test("actual client authenticates personal favorites while keeping public discovery anonymous", async () => {
+  const calls=[];
+  const client=load("lib/api.ts", {fetch:async(url,options)=>{calls.push({url,options});return url.endsWith("/auth/login")?json({accessToken:"favorite-access",user:{id:"u"}}):json({favorite:true});}});
+  await client.authApi.login("u@example.com","credential");
+  for(const p of ["/facilities/favorites?page=1", "/facilities/11111111-2222-4333-8444-555555555555/favorite"])await client.api(p);
+  assert.equal(calls[1].options.headers.get("authorization"),"Bearer favorite-access");
+  assert.equal(calls[2].options.headers.get("authorization"),"Bearer favorite-access");
+  await client.api("/facilities?provinceCode=01");assert.equal(calls[3].options.headers.has("authorization"),false);await client.api("/facilities/11111111-2222-4333-8444-555555555555/operations/access?permission=SCHEDULE_MANAGE");assert.equal(calls[4].options.headers.get("authorization"),"Bearer favorite-access");
+});
+test("configuration impact details survive the real client error envelope and accepted void responses", async () => {
+  const details={reason:"CONFIGURATION_IMPACT",affectedCount:1,affectedReservations:[{id:"reservation",state:"BOOKED"}],truncated:false};
+  const responses=[Response.json({message:"Conflict",code:"COMMON-002",details},{status:409}),Response.json({message:"Accepted"},{status:202})];
+  const client=load("lib/api.ts",{fetch:async()=>responses.shift()});
+  await assert.rejects(client.api("/owner/courts/id/maintenance",{method:"POST",body:"{}"}),e=>e.status===409&&e.details.affectedCount===1&&e.details.affectedReservations[0].state==="BOOKED");
+  assert.equal(await client.api("/groups/id/reminders",{method:"POST"}),undefined);
+});
+test("current fallback route grammar includes new scoped screens and excludes invented paths",()=>{
+  const current=load("lib/routes.ts"),id="11111111-2222-4333-8444-555555555555";
+  for(const p of ["/customer/favorites","/customer/staff-invitations",`/customer/groups/play-groups/${id}`,`/owner/facilities/${id}/court-types`,`/owner/application/${id}/facility/court-types`,`/staff/bookings/${id}`,`/staff/facilities/${id}/schedule`,`/staff/facilities/${id}/schedule/preview`,`/admin/bookings/reconciliation/${id}`,"/admin/sports"])assert.equal(current.isFrontendRoute(p),true,p);
+  for(const p of ["/admin/execute-refund", "/owner/facilities/invalid/court-types",`/staff/bookings/${id}/extra`])assert.equal(current.isFrontendRoute(p),false,p);
 });

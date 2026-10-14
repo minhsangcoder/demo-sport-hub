@@ -14,6 +14,7 @@ public class InternalTransferController {
     private final TransferLeaseService service;private final ObjectMapper json;private final String secret;
     public InternalTransferController(TransferLeaseService service,ObjectMapper json,@Value("${SERVICE_CALL_SECRET}") String secret){this.service=service;this.json=json;this.secret=secret;}
     @GetMapping("/{id}") public ApiResponse<com.fasterxml.jackson.databind.JsonNode> inspect(@PathVariable UUID id,HttpServletRequest request){verify(request,"");return ApiResponse.success(service.inspect(id));}
+    @GetMapping("/transfer-leases/{listingId}") public ApiResponse<java.util.Map<String,Object>> receipt(@PathVariable UUID listingId,HttpServletRequest request){verify(request,"");return ApiResponse.success(service.receipt(listingId));}
     @PostMapping("/transfer/{action}") public ApiResponse<BookingDtos.Booking> command(@PathVariable String action,@RequestBody String body,HttpServletRequest request)throws Exception {
         verify(request,body);return ApiResponse.success(service.command(action,json.readValue(body,TransferLeaseService.Command.class)));
     }

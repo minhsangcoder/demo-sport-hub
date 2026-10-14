@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { refreshSession } from '@/lib/api'
@@ -23,7 +24,7 @@ export function GoogleAuthCallback() {
   return error
     ? <main className="mx-auto max-w-md px-5 py-16 text-center">
         <p role="alert" className="text-red-700">Không thể hoàn tất đăng nhập Google. Vui lòng thử lại.</p>
-        <a className="mt-4 inline-block text-emerald-700 underline" href="/login">Quay lại đăng nhập</a>
+        <Link className="mt-4 inline-block text-emerald-700 underline" href="/login">Quay lại đăng nhập</Link>
       </main>
     : <main className="px-5 py-16 text-center" role="status">Đang hoàn tất đăng nhập…</main>
 }

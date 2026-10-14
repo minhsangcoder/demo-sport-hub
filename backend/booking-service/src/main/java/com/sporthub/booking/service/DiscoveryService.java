@@ -21,21 +21,23 @@ public class DiscoveryService {
     public DiscoveryService(DiscoveryDependencies dependencies,BookingService bookings,Clock clock,@org.springframework.beans.factory.annotation.Value("${booking.advance-days:90}") int advanceDays){this.dependencies=dependencies;this.bookings=bookings;this.clock=clock;this.advanceDays=advanceDays;}
     public SearchResult search(Criteria input){
         text(input.q());
-        var today=clock.instant().atZone(ZoneId.of("Asia/Ho_Chi_Minh")).toLocalDate();
+        var today=clock.instant().atZone(ZoneOffset.UTC).toLocalDate();
         LocalDate day;LocalTime after,before;
         try {day=input.date()==null?today:LocalDate.parse(input.date());after=input.opensAfter()==null?null:LocalTime.parse(input.opensAfter());before=input.closesBefore()==null?null:LocalTime.parse(input.closesBefore());}
         catch(DateTimeException ex){throw new IllegalArgumentException("Use a valid ISO play date and HH:mm time window");}
-        if(day.isBefore(today)||day.isAfter(today.plusDays(advanceDays)))throw new IllegalArgumentException("Choose a play date inside the booking window");
+        if(input.date()!=null&&(day.isBefore(today.minusDays(1))||day.isAfter(today.plusDays(advanceDays+1L))))throw new IllegalArgumentException("Choose a play date inside the booking window");
         if(after!=null&&before!=null&&!after.isBefore(before))throw new IllegalArgumentException("The time window must end after it starts");
         if((input.minPrice()!=null&&input.minPrice().signum()<0)||(input.maxPrice()!=null&&input.maxPrice().signum()<0)||(input.minPrice()!=null&&input.maxPrice()!=null&&input.minPrice().compareTo(input.maxPrice())>0))throw new IllegalArgumentException("Invalid per-slot price range");
         boolean origin=input.latitude()!=null&&input.longitude()!=null;
         if((input.latitude()!=null||input.longitude()!=null)&&!origin || origin&&(!Double.isFinite(input.latitude())||!Double.isFinite(input.longitude())||Math.abs(input.latitude())>90||Math.abs(input.longitude())>180) || input.radiusKm()!=null&&(!origin||!Double.isFinite(input.radiusKm())||input.radiusKm()<=0||input.radiusKm()>500))throw new IllegalArgumentException("Supply valid latitude/longitude and a radius of up to 500 km");
         String sort=input.sort()==null?"NAME":input.sort();if(!Set.of("NAME","PRICE_ASC","PRICE_DESC","DISTANCE").contains(sort)||sort.equals("DISTANCE")&&!origin)throw new IllegalArgumentException("Choose a valid sort; distance requires latitude/longitude");
-        var results=new ArrayList<Result>();boolean truncated=false;int scanned=0;
+        var results=new ArrayList<Result>();boolean truncated=false;int scanned=0;boolean validVenueDate=false;
         try{
-            var names=new HashMap<UUID,String>();for(var category:dependencies.categories())if(category.path("active").asBoolean())names.put(UUID.fromString(category.path("id").asText()),category.path("name").asText());
+            var names=new HashMap<UUID,String>();for(var category:dependencies.categories())names.put(UUID.fromString(category.path("id").asText()),category.path("name").asText());
             var facilities=dependencies.facilities(input.q(),input.provinceCode(),input.sportCategoryId());truncated=facilities.size()>=200;
             outer:for(var f:facilities){
+                var venueZone=ZoneId.of(f.path("timezone").asText());var venueToday=clock.instant().atZone(venueZone).toLocalDate();var playDay=input.date()==null?venueToday:day;
+                if(playDay.isBefore(venueToday)||playDay.isAfter(venueToday.plusDays(advanceDays)))continue;validVenueDate=true;
                 Double lat=f.path("latitude").isNumber()?f.path("latitude").doubleValue():null,lon=f.path("longitude").isNumber()?f.path("longitude").doubleValue():null;
                 Double distance=origin&&lat!=null&&lon!=null?distance(input.latitude(),input.longitude(),lat,lon):null;
                 if(input.radiusKm()!=null&&(distance==null||distance>input.radiusKm()))continue;
@@ -44,7 +46,7 @@ public class DiscoveryService {
                 for(var court:dependencies.courts(facilityId)){
                     UUID category=UUID.fromString(court.path("sportCategoryId").asText());if(!court.path("enabled").asBoolean()||!names.containsKey(category)||input.sportCategoryId()!=null&&!input.sportCategoryId().equals(category))continue;
                     if(scanned++>=200){truncated=true;break outer;}
-                    UUID courtId=UUID.fromString(court.path("id").asText());var preview=bookings.availability(courtId,day.toString());var slots=new ArrayList<JsonNode>();var zone=ZoneId.of(summary.timezone());
+                    UUID courtId=UUID.fromString(court.path("id").asText());var preview=bookings.availability(courtId,playDay.toString());var slots=new ArrayList<JsonNode>();var zone=ZoneId.of(summary.timezone());
                     for(var slot:preview.path("slots")){
                         if(!slot.path("state").asText().equals("AVAILABLE")||!slot.path("amount").isNumber())continue;
                         Instant start=Instant.parse(slot.path("startsAt").asText()),end=Instant.parse(slot.path("endsAt").asText());
@@ -55,9 +57,10 @@ public class DiscoveryService {
                     }
                     if(slots.isEmpty())continue;
                     var first=slots.stream().min(Comparator.comparing(s->s.path("startsAt").asText())).orElseThrow();var cheapest=slots.stream().min(Comparator.comparing(s->s.path("amount").decimalValue())).orElseThrow();
-                    results.add(new Result(summary,courtId,court.path("name").asText(),category,names.get(category),day.toString(),cheapest.path("amount").decimalValue(),cheapest.path("currency").asText("VND"),slots.size(),Instant.parse(first.path("startsAt").asText()),Instant.parse(first.path("endsAt").asText()),distance));
+                    results.add(new Result(summary,courtId,court.path("name").asText(),category,names.get(category),playDay.toString(),cheapest.path("amount").decimalValue(),cheapest.path("currency").asText("VND"),slots.size(),Instant.parse(first.path("startsAt").asText()),Instant.parse(first.path("endsAt").asText()),distance));
                 }
             }
+            if(input.date()!=null&&!facilities.isEmpty()&&!validVenueDate)throw new IllegalArgumentException("Choose a play date inside the facilities local booking window");
         }catch(org.springframework.web.client.RestClientException ex){throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Search data is temporarily unavailable; please retry",ex);}catch(com.sporthub.common.exception.ResourceNotFoundException ex){throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Court availability changed during search; please retry",ex);}
         Comparator<Result> comparator=switch(sort){case "PRICE_ASC"->Comparator.comparing(Result::fromPrice);case "PRICE_DESC"->Comparator.comparing(Result::fromPrice).reversed();case "DISTANCE"->Comparator.comparing(Result::distanceKm,Comparator.nullsLast(Double::compareTo));default->Comparator.comparing(r->r.facility().name());};
         results.sort(comparator.thenComparing(Result::courtName).thenComparing(Result::courtId));if(results.size()>100)truncated=true;

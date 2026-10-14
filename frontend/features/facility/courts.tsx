@@ -7,6 +7,7 @@ import { useApi } from '@/lib/use-api'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { useFacility } from './facility-context'
+import {type CourtType} from '@/lib/business-api'
 import type { Court,Category } from './types'
 export function CourtsPage(){
  const {facility,basePath}=useFacility();const {data,error,loading,reload}=useApi<Court[]>(`/owner/facilities/${facility.id}/courts`)
@@ -25,9 +26,10 @@ export function CourtEditor({courtId}:{courtId?:string}){
 function CourtForm({court}:{court?:Court}){
  const {facility,basePath}=useFacility();const router=useRouter();const categories=useApi<Category[]>('/sport-categories');const [busy,setBusy]=useState(false);const [error,setError]=useState('')
  const [fields,setFields]=useState<Record<string,string>>({})
+ const types=useApi<CourtType[]>(`/owner/facilities/${facility.id}/court-types`)
  const [sportCategoryId,setSportCategoryId]=useState(court?.sportCategoryId??'')
  async function save(event:React.FormEvent<HTMLFormElement>){event.preventDefault();if(busy)return;setBusy(true);setError('');setFields({});const form=new FormData(event.currentTarget)
-  try{await api<Court>(court?`/owner/courts/${court.id}`:`/owner/facilities/${facility.id}/courts`,{method:court?'PUT':'POST',body:JSON.stringify({code:String(form.get('code')).trim(),name:String(form.get('name')).trim(),sportCategoryId:form.get('sportCategoryId'),description:form.get('description'),enabled:form.get('enabled')==='on'})});router.push(`${basePath}/courts`)}
+  try{await api<Court>(court?`/owner/courts/${court.id}`:`/owner/facilities/${facility.id}/courts`,{method:court?'PUT':'POST',body:JSON.stringify({code:String(form.get('code')).trim(),name:String(form.get('name')).trim(),sportCategoryId:form.get('sportCategoryId'),description:form.get('description'),courtTypeId:form.get('courtTypeId')||null,enabled:form.get('enabled')==='on'})});router.push(`${basePath}/courts`)}
   catch(err){setError(err instanceof Error?err.message:'Không thể lưu sân.');if(err instanceof ApiError)setFields(Object.fromEntries(err.fieldErrors.map(f=>[f.field,f.message])))}finally{setBusy(false)}
  }
  return <section><h2 className="mb-6 text-2xl font-bold">{court?'Chỉnh sửa sân':'Thêm sân mới'}</h2><form className="grid max-w-2xl gap-5 rounded-xl border p-6" onSubmit={save}>
@@ -35,6 +37,7 @@ function CourtForm({court}:{court?:Court}){
   <label className="grid gap-2 text-sm">Tên sân<Input name="name" defaultValue={court?.name} required maxLength={180} disabled={busy}/>{fields.name&&<span className="text-red-700">{fields.name}</span>}</label>
   <label className="grid gap-2 text-sm">Môn thể thao<select name="sportCategoryId" className="h-10 rounded-lg border bg-white px-3" value={sportCategoryId} onChange={event=>setSportCategoryId(event.target.value)} required disabled={busy||categories.loading}><option value="">Chọn môn thể thao</option>{categories.data?.filter(c=>c.active||c.id===court?.sportCategoryId).map(c=><option key={c.id} value={c.id}>{c.name}{!c.active?' (ngừng tạo mới)':''}</option>)}</select></label>
   {categories.loading&&<p role="status">Đang tải danh mục…</p>}{categories.error&&<p role="alert" className="text-red-700">{categories.error}</p>}{categories.data?.length===0&&<p>Danh mục môn thể thao đang trống; Admin cần tạo danh mục trước.</p>}
+  <label className="grid gap-2 text-sm">Loại sân<select name="courtTypeId" defaultValue={court?.courtTypeId??""} className="rounded-lg border p-3"><option value="">Chưa phân loại</option>{types.data?.filter(t=>t.active||t.id===court?.courtTypeId).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
   <label className="grid gap-2 text-sm">Mô tả<textarea name="description" className="min-h-24 rounded-lg border p-3" defaultValue={court?.description} maxLength={5000} disabled={busy}/></label>
   <label className="flex gap-3 text-sm"><input name="enabled" type="checkbox" defaultChecked={court?.enabled??true} disabled={busy}/>Bật sân để vận hành</label>
   {error&&<p role="alert" className="text-red-700">{error}</p>}<Button type="submit" disabled={busy||categories.loading} className="bg-emerald-600 text-white">{busy?'Đang lưu…':'Lưu sân'}</Button>

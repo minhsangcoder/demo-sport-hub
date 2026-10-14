@@ -21,7 +21,8 @@ public class GroupExpiration {
     }
     public void requestReview(UUID booking,UUID payment,UUID payer,String reason) {
         var publisher=outbox.getIfAvailable();
-        if(publisher!=null)publisher.record(RabbitMQConfig.EXCHANGE_BOOKING,
+        if(publisher==null)throw new IllegalStateException("Group payment review requires a durable outbox");
+        publisher.record(RabbitMQConfig.EXCHANGE_BOOKING,
             DomainEvent.create("booking.group.refund.requested",1,"booking-service",booking,
                 Map.of("bookingId",booking,"paymentId",payment,"payerId",payer,"reason",reason,"policyState","BLOCKED_RULE")));
     }

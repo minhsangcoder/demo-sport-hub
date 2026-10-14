@@ -9,7 +9,9 @@
     "start": "next start",
     "typecheck": "next typegen && tsc --noEmit --incremental false",
     "test:auth": "node --test tests/google-auth.test.mjs",
-    "lint": "eslint ."
+    "lint": "eslint app components features lib tests",
+    "test": "node --test tests/*.test.mjs",
+    "test:e2e": "node tests/system-e2e.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

@@ -60,7 +60,8 @@ public class IdentityContextGlobalFilter implements GlobalFilter, Ordered {
 
         return authenticationResolver.resolve(sanitizedExchange)
                 .map(Optional::of)
-                .onErrorResume(error -> unauthorized(sanitizedExchange).then(Mono.empty()))
+                .onErrorResume(error -> publicRequest ? Mono.empty()
+                        : authenticationFailure(sanitizedExchange, error).then(Mono.empty()))
                 .defaultIfEmpty(Optional.empty())
                 .flatMap(identity -> {
                     if (sanitizedExchange.getResponse().isCommitted()) return Mono.empty();
@@ -101,6 +102,18 @@ public class IdentityContextGlobalFilter implements GlobalFilter, Ordered {
         exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
         exchange.getResponse().getHeaders().setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
         byte[] body = "{\"status\":401,\"code\":\"IDENTITY-UNAUTHORIZED\",\"message\":\"Phiên đăng nhập không hợp lệ hoặc đã hết hạn\"}"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return exchange.getResponse().writeWith(Mono.just(exchange.getResponse().bufferFactory().wrap(body)));
+    }
+
+    private Mono<Void> authenticationFailure(ServerWebExchange exchange, Throwable error) {
+        boolean invalid = error instanceof io.jsonwebtoken.JwtException || error instanceof IllegalArgumentException
+                || error instanceof org.springframework.web.reactive.function.client.WebClientResponseException failure
+                    && (failure.getStatusCode().value() == 401 || failure.getStatusCode().value() == 403);
+        if (invalid) return unauthorized(exchange);
+        exchange.getResponse().setStatusCode(HttpStatus.SERVICE_UNAVAILABLE);
+        exchange.getResponse().getHeaders().setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+        byte[] body = "{\"status\":503,\"code\":\"IDENTITY-AUTH-UNAVAILABLE\",\"message\":\"Authentication service is temporarily unavailable\"}"
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8);
         return exchange.getResponse().writeWith(Mono.just(exchange.getResponse().bufferFactory().wrap(body)));
     }

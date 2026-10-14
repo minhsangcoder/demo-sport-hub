@@ -16,7 +16,9 @@ import java.util.*;
 public class PaymentOutcomeConsumer {
     private final BookingRepository repo;private final ObjectMapper json;private final Clock clock;
     private final GroupService groups;
-    public PaymentOutcomeConsumer(BookingRepository repo,ObjectMapper json,Clock clock,GroupService groups){this.repo=repo;this.json=json;this.clock=clock;this.groups=groups;}
+    private final ConfigurationGuardService configuration;
+    private final BookingLifecycle lifecycle;
+    public PaymentOutcomeConsumer(BookingRepository repo,ObjectMapper json,Clock clock,GroupService groups,ConfigurationGuardService configuration,BookingLifecycle lifecycle){this.repo=repo;this.json=json;this.clock=clock;this.groups=groups;this.configuration=configuration;this.lifecycle=lifecycle;}
     @RabbitListener(queues=BookingConfig.PAYMENT_QUEUE)
     @Transactional
     public void receive(Message message) {
@@ -27,11 +29,20 @@ public class PaymentOutcomeConsumer {
     @Transactional
     public void apply(JsonNode event) {
         if(!event.path("eventType").asText().equals("payment.completed")||event.path("eventVersion").asInt()!=1||!event.path("producer").asText().equals("payment-service"))throw new AmqpRejectAndDontRequeueException("Unsupported payment envelope");
-        var payload=event.path("payload");if(payload.path("purpose").asText().equals("TRANSFER"))return;UUID eventId,bookingId,paymentId,payer;
-        try {eventId=UUID.fromString(event.path("eventId").asText());bookingId=UUID.fromString(payload.path("bookingId").asText());paymentId=UUID.fromString(payload.path("paymentId").asText());payer=UUID.fromString(payload.path("payerId").asText());}
+        var payload=event.path("payload");if(payload.path("purpose").asText().equals("TRANSFER"))return;UUID eventId,bookingId,paymentId,payer;Instant paidAt;
+        try {eventId=UUID.fromString(event.path("eventId").asText());bookingId=UUID.fromString(payload.path("bookingId").asText());paymentId=UUID.fromString(payload.path("paymentId").asText());payer=UUID.fromString(payload.path("payerId").asText());
+            if(!paymentId.toString().equals(event.path("aggregateId").asText())||!Set.of("SUCCESS","FAILED").contains(payload.path("status").asText()))throw new IllegalArgumentException();
+            if(payload.path("purpose").asText().equals("GROUP_CONTRIBUTION"))UUID.fromString(payload.path("memberId").asText());
+            com.sporthub.common.money.Money.positive(payload.path("amount").decimalValue(),payload.path("currency").asText());
+            paidAt=Instant.parse(payload.path("paidAt").asText());}
         catch(Exception ex){throw new AmqpRejectAndDontRequeueException("Invalid payment payload",ex);}
-        var booking=repo.find(bookingId);repo.lock(booking.courtId());booking=repo.find(bookingId);
+        var booking=repo.find(bookingId);repo.lock(booking.courtId());booking=repo.find(bookingId);configuration.lockReservationFacility(booking.facilityId());
         if(repo.jdbc().update("INSERT INTO event_inbox(consumer,event_id) VALUES('booking-payment',?) ON CONFLICT DO NOTHING",eventId)==0)return;
+        String fingerprint=com.sporthub.common.security.Signatures.sha256(bookingId+"|"+payer+"|"+payload.path("memberId").asText()+"|"+payload.path("purpose").asText()+"|"+payload.path("status").asText()+"|"+payload.path("amount").decimalValue().stripTrailingZeros().toPlainString()+"|"+payload.path("currency").asText()+"|"+paidAt);
+        if(repo.jdbc().update("INSERT INTO booking_payment_receipts(payment_id,booking_id,fingerprint) VALUES(?,?,?) ON CONFLICT DO NOTHING",paymentId,bookingId,fingerprint)==0){
+            if(!fingerprint.equals(repo.jdbc().queryForObject("SELECT fingerprint FROM booking_payment_receipts WHERE payment_id=?",String.class,paymentId)))review(bookingId,paymentId,payer,"PAYMENT_PAYLOAD_CONFLICT");
+            return;
+        }
         if(!payload.path("status").asText().equals("SUCCESS")) {repo.history(bookingId,payer,"PAYMENT_FAILED",Map.of("paymentId",paymentId));return;}
         boolean group=repo.jdbc().queryForObject("SELECT count(*) FROM booking_groups WHERE id=?",Integer.class,bookingId)>0;
         if(group&&payload.path("purpose").asText().equals("GROUP_CONTRIBUTION")){groups.paid(bookingId,paymentId,payer,payload);return;}
@@ -39,17 +50,20 @@ public class PaymentOutcomeConsumer {
             repo.jdbc().update("INSERT INTO payment_reconciliation(id,booking_id,payment_id,reason) VALUES(?,?,?,'PURPOSE_MISMATCH') ON CONFLICT(payment_id) DO NOTHING",UUID.randomUUID(),bookingId,paymentId);return;
         }
         if(booking.paymentId()!=null&&booking.paymentId().equals(paymentId))return;
-        Instant paidAt=Instant.parse(payload.path("paidAt").asText());String reason=null;
-        if(!booking.currentHolderId().equals(payer))reason="PAYER_MISMATCH";
+        String reason=null;
+        if(!booking.currentHolderId().equals(payer)&&!(booking.source().equals("OFFLINE_COUNTER")&&booking.createdBy().equals(payer)))reason="PAYER_MISMATCH";
         else if(booking.amount().compareTo(payload.path("amount").decimalValue())!=0||!booking.currency().equals(payload.path("currency").asText()))reason="AMOUNT_MISMATCH";
         else if(!booking.status().equals("PENDING"))reason="BOOKING_NOT_PENDING";
-        else if(paidAt.isAfter(booking.holdExpiresAt())||!clock.instant().isBefore(booking.holdExpiresAt()))reason="LATE_PAYMENT";
+        else if(!paidAt.isBefore(booking.holdExpiresAt())||!clock.instant().isBefore(booking.holdExpiresAt()))reason="LATE_PAYMENT";
+        else if(!lifecycle.hasLiveHold(booking,clock.instant()))reason="RESERVATION_NOT_HELD";
+        else if(repo.jdbc().queryForObject("SELECT count(*) FROM bookings WHERE payment_id=? AND id<>?",Integer.class,paymentId,bookingId)>0)reason="PAYMENT_ALREADY_APPLIED";
         if(reason!=null) {
-            repo.jdbc().update("INSERT INTO payment_reconciliation(id,booking_id,payment_id,reason) VALUES(?,?,?,?) ON CONFLICT(payment_id) DO NOTHING",UUID.randomUUID(),bookingId,paymentId,reason);
-            repo.history(bookingId,payer,"PAYMENT_REQUIRES_REVIEW",Map.of("paymentId",paymentId,"reason",reason));return;
+            review(bookingId,paymentId,payer,reason);return;
         }
-        repo.jdbc().update("UPDATE bookings SET status='CONFIRMED',payment_id=?,paid_at=?,checkin_token_version=checkin_token_version+1,version=version+1,updated_at=NOW() WHERE id=?",paymentId,Timestamp.from(paidAt),bookingId);
-        repo.jdbc().update("UPDATE slot_reservations SET state='BOOKED' WHERE id=(SELECT reservation_id FROM bookings WHERE id=?) AND state='HOLD'",bookingId);
-        repo.history(bookingId,payer,"CONFIRMED",Map.of("paymentId",paymentId));
+        lifecycle.transition(booking,"CONFIRMED",payer,"CONFIRMED",Map.of("paymentId",paymentId),paidAt,paymentId);
+    }
+    private void review(UUID booking,UUID payment,UUID payer,String reason){
+        repo.jdbc().update("INSERT INTO payment_reconciliation(id,booking_id,payment_id,reason) VALUES(?,?,?,?) ON CONFLICT(payment_id) DO NOTHING",UUID.randomUUID(),booking,payment,reason);
+        repo.history(booking,payer,"PAYMENT_REQUIRES_REVIEW",Map.of("paymentId",payment,"reason",reason));
     }
 }

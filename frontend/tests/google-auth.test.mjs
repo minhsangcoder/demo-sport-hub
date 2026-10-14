@@ -42,6 +42,7 @@ function loadModule(name, globals, overrides = {}, cache = new Map()) {
     CustomEvent: class { constructor(type, { detail }) { this.type = type; this.detail = detail } },
     ...globals,
     require(id) {
+      if (id === 'next/link') return { default: 'a' }
       if (Object.hasOwn(overrides, id)) return overrides[id]
       if (dependencies[id]) return loadModule(dependencies[id], globals, overrides, cache)
       throw new Error(`Unexpected dependency: ${id}`)

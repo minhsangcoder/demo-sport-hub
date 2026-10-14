@@ -26,9 +26,12 @@ public class ChallengeService {
     private final SecretHashingService secrets;
     private final MailDeliveryService mailDelivery;
     private final IdentityProperties properties;
+    private final UserSecurityLock securityLock;
+    private final jakarta.persistence.EntityManager entities;
 
     @Transactional
     public ChallengeIssued issue(User user, OtpPurpose purpose, String recipient) {
+        securityLock.lock(user.getId());
         repository.findByUserIdAndPurposeAndVerifiedFalse(user.getId(), purpose)
                 .forEach(existing -> {
                     existing.setVerified(true);
@@ -95,14 +98,31 @@ public class ChallengeService {
     public OtpCode consumeReset(UUID challengeId, String code) {
         OtpCode challenge = load(challengeId, OtpPurpose.PASSWORD_RESET);
         validateUsable(challenge);
+        User user = securityLock.current(challenge.getUser());
+        String recipient = challenge.getRecipient();
+        boolean currentContact = user.isEmailVerified() && user.getEmail() != null && user.getEmail().equalsIgnoreCase(recipient)
+                || user.isPhoneVerified() && user.getPhone() != null && user.getPhone().equals(recipient);
+        if (!currentContact) throw invalidChallenge();
         if (!passwordEncoder.matches(code, challenge.getCodeHash())) {
             failAttempt(challenge);
         }
         return markUsed(challenge);
     }
 
+    @Transactional
+    public void invalidatePasswordResets(User user, String recipient) {
+        if (recipient == null) return;
+        securityLock.lock(user.getId());
+        repository.findByUserIdAndPurposeAndVerifiedFalse(user.getId(), OtpPurpose.PASSWORD_RESET).stream()
+                .filter(challenge -> recipient.equalsIgnoreCase(challenge.getRecipient()))
+                .forEach(challenge -> { challenge.setVerified(true); challenge.setVerifiedAt(Instant.now()); });
+    }
+
     private OtpCode load(UUID id, OtpPurpose purpose) {
+        OtpCode candidate = repository.findById(id).orElseThrow(this::invalidChallenge);
+        securityLock.lock(candidate.getUser().getId());
         OtpCode challenge = repository.findWithLockById(id).orElseThrow(this::invalidChallenge);
+        entities.refresh(challenge);
         if (purpose != null && challenge.getPurpose() != purpose) {
             throw invalidChallenge();
         }

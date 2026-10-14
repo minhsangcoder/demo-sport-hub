@@ -46,6 +46,8 @@ spring:
   # ── Redis ───────────────────────────────────────────────────
   data:
     redis:
+      connect-timeout: 3s
+      timeout: 3s
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD}
@@ -105,7 +107,7 @@ management:
         include: health, info
   endpoint:
     health:
-      show-details: when-authorized
+      show-details: never
 
 # ── Logging ───────────────────────────────────────────────────
 logging:

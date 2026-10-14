@@ -18,18 +18,19 @@ public class FacilityNoticeConsumer {
  public FacilityNoticeConsumer(JdbcTemplate jdbc,ObjectMapper json){this.jdbc=jdbc;this.json=json;}
  @RabbitListener(queues=QUEUE) @Transactional public void receive(Message message){try{apply(json.readTree(message.getBody()));}catch(java.io.IOException ex){throw new AmqpRejectAndDontRequeueException("Invalid facility notice",ex);}}
  @Transactional public void apply(JsonNode event){
-  if(!event.path("producer").asText().equals("facility-service")||!event.path("eventType").asText().equals("facility.reviewed")||event.path("eventVersion").asInt()!=1)throw new AmqpRejectAndDontRequeueException("Unsupported facility notice");
-  UUID eventId,owner,review;var body=event.path("payload");
-  try{eventId=UUID.fromString(event.path("eventId").asText());owner=UUID.fromString(body.path("ownerId").asText());review=UUID.fromString(body.path("reviewId").asText());}
+  if(!event.path("producer").asText().equals("facility-service")||!Set.of("facility.reviewed","facility.status.changed").contains(event.path("eventType").asText())||event.path("eventVersion").asInt()!=1)throw new AmqpRejectAndDontRequeueException("Unsupported facility notice");
+  UUID eventId,owner,review;var body=event.path("payload");boolean statusChange=event.path("eventType").asText().equals("facility.status.changed");
+  try{eventId=UUID.fromString(event.path("eventId").asText());owner=UUID.fromString(body.path("ownerId").asText());review=UUID.fromString(body.path(statusChange?"decisionId":"reviewId").asText());}
   catch(Exception ex){throw new AmqpRejectAndDontRequeueException("Invalid notice references",ex);}
   var rows=jdbc.queryForList("SELECT email,phone,email_verified,phone_verified FROM users WHERE id=?",owner);
   if(rows.isEmpty())throw new AmqpRejectAndDontRequeueException("Notice recipient does not exist");
   if(jdbc.update("INSERT INTO event_inbox(consumer,event_id) VALUES('facility-notice',?) ON CONFLICT DO NOTHING",eventId)==0)return;
   var user=rows.getFirst();String recipient=Boolean.TRUE.equals(user.get("email_verified"))?(String)user.get("email"):Boolean.TRUE.equals(user.get("phone_verified"))?(String)user.get("phone"):null;
-  if(recipient!=null)jdbc.update("INSERT INTO identity_notifications(id,user_id,recipient,subject,body,source_key) VALUES(?,?,?,?,?,?) ON CONFLICT(source_key) WHERE source_key IS NOT NULL DO NOTHING",UUID.randomUUID(),owner,recipient,"SportHub facility review: "+body.path("state").asText(),body.path("facilityName").asText()+" — "+body.path("state").asText()+". "+body.path("reason").asText(),"facility-review:"+review);
+  if(recipient!=null)jdbc.update("INSERT INTO identity_notifications(id,user_id,recipient,subject,body,source_key) VALUES(?,?,?,?,?,?) ON CONFLICT(source_key) WHERE source_key IS NOT NULL DO NOTHING",UUID.randomUUID(),owner,recipient,"SportHub facility "+(statusChange?"status: ":"review: ")+body.path("state").asText(),body.path("facilityName").asText()+" — "+body.path("state").asText()+". "+body.path("reason").asText(),(statusChange?"facility-status:":"facility-review:")+review);
  }
  @Configuration static class Messaging {
   @Bean org.springframework.amqp.core.Queue facilityNoticesQueue(){return QueueBuilder.durable(QUEUE).deadLetterExchange("sporthub.dlx").build();}
+  @Bean Binding facilityStatusBinding(){return BindingBuilder.bind(facilityNoticesQueue()).to(new TopicExchange("sporthub.facility")).with("facility.status.changed");}
   @Bean Binding facilityNoticeBinding(){return BindingBuilder.bind(facilityNoticesQueue()).to(new TopicExchange("sporthub.facility")).with("facility.reviewed");}
  }
 }

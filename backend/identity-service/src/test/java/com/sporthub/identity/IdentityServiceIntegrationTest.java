@@ -90,9 +90,13 @@ class IdentityServiceIntegrationTest {
     @Autowired IdentityNotificationJob notificationJob;
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     @MockBean MailDeliveryService mailDelivery;
+    @MockBean LoginAttemptLimiter loginAttempts;
     @MockBean OwnerApplicationDependencies applicationDependencies;
     @Autowired OwnerApplicationService applications;
     @Autowired OwnerApplicationCipher applicationCipher;
+    @Autowired StaffBindingService staff;
+    @MockBean StaffFacilityAccess staffFacilityAccess;
+    private final Map<UUID,UUID> staffFacilityOwners=new ConcurrentHashMap<>();
 
     private final Map<String, String> verificationCodes = new ConcurrentHashMap<>();
     private final Map<String, String> resetCodes = new ConcurrentHashMap<>();
@@ -102,6 +106,8 @@ class IdentityServiceIntegrationTest {
     void captureOutboundCodes() {
         reset(mailDelivery);
         reset(applicationDependencies);
+        reset(staffFacilityAccess);staffFacilityOwners.clear();
+        doAnswer(a->{UUID facility=a.getArgument(0);var actor=a.<com.sporthub.identity.security.AuthenticatedUser>getArgument(1);if(!actor.roles().contains(Role.OWNER)||!actor.userId().equals(staffFacilityOwners.get(facility)))throw new com.sporthub.common.exception.ForbiddenException("Facility is outside your ownership");return null;}).when(staffFacilityAccess).owner(any(),any(),any());
         var applicationJson=new com.fasterxml.jackson.databind.ObjectMapper();
         org.mockito.Mockito.when(applicationDependencies.facility(any(UUID.class),anyString(),anyMap(),any())).thenAnswer(invocation->{
             String command=invocation.getArgument(1);return command.equals("submit")?applicationJson.readTree("{\"snapshot\":{\"facility\":{\"name\":\"First facility\"},\"hours\":[],\"prices\":[]}}"):applicationJson.createObjectNode();
@@ -957,5 +963,328 @@ class IdentityServiceIntegrationTest {
         http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(path).header("Authorization","Bearer "+adminToken))
             .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isUnauthorized());
     }
+
+
+    @Test void ownerRoleCannotBeGrantedBeforeApplicationApprovalAndCustomerCannotCallAdmin() throws Exception {
+        var admin=applicationAdmin();var target=activate(uniqueEmail("owner-escalation"));
+        assertThatThrownBy(()->adminAccounts.roles(target.getId(),new AdminAccountDtos.RolesInput(java.util.Set.of(Role.CUSTOMER,Role.OWNER),"Unauthorized shortcut"),admin,metadata))
+            .isInstanceOf(IdentityException.class).hasMessageContaining("approved Owner application");
+        assertThatThrownBy(()->adminAccounts.roles(target.getId(),new AdminAccountDtos.RolesInput(java.util.Set.of(Role.CUSTOMER,Role.ADMIN),"Unapproved Admin delegation"),admin,metadata))
+            .isInstanceOf(IdentityException.class).hasMessageContaining("hierarchy policy");
+        assertThat(userRepository.findById(target.getId()).orElseThrow().getRoles()).containsExactly(Role.CUSTOMER);
+        String token=authService.login(new LoginRequest(target.getEmail(),"Password123!"),metadata).response().accessToken();
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/admin/accounts/"+admin.userId()).header("Authorization","Bearer "+token).header("X-User-Role","ADMIN"))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/staff-bindings/facilities/"+UUID.randomUUID()).header("Authorization","Bearer "+token))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+    }
+    @Test void parallelRefreshHasOneWinnerAndLosingRequestsNeverOverwriteItsCookie() throws Exception {
+        var user=activate(uniqueEmail("parallel-refresh"));var session=authService.login(new LoginRequest(user.getEmail(),"Password123!"),metadata);
+        String expired=io.jsonwebtoken.Jwts.builder().subject(user.getId().toString()).claim("sid",jwtService.parseAccessToken(session.response().accessToken()).sessionId().toString()).claim("roles",java.util.List.of("CUSTOMER"))
+            .expiration(java.util.Date.from(Instant.now().minusSeconds(60))).signWith(io.jsonwebtoken.security.Keys.hmacShaKeyFor("test-only-secret-that-is-at-least-32-bytes-long".getBytes(java.nio.charset.StandardCharsets.UTF_8))).compact();
+        var ready=new java.util.concurrent.CountDownLatch(8);var go=new java.util.concurrent.CountDownLatch(1);
+        var pool=java.util.concurrent.Executors.newFixedThreadPool(8);
+        try {
+            var futures=new java.util.ArrayList<java.util.concurrent.Future<org.springframework.mock.web.MockHttpServletResponse>>();
+            for(int i=0;i<8;i++)futures.add(pool.submit(()->{ready.countDown();go.await();return http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/auth/refresh")
+                .header("Authorization","Bearer "+expired).cookie(new jakarta.servlet.http.Cookie("sporthub_refresh",session.refreshToken()))).andReturn().getResponse();}));
+            assertThat(ready.await(5,java.util.concurrent.TimeUnit.SECONDS)).isTrue();go.countDown();
+            int success=0;String winner=null;
+            for(var future:futures){var r=future.get(20,java.util.concurrent.TimeUnit.SECONDS);if(r.getStatus()==200){success++;winner=org.springframework.mock.web.MockCookie.parse(r.getHeader("Set-Cookie")).getValue();assertThat(r.getHeader("Cache-Control")).isEqualTo("no-store");}else{assertThat(r.getStatus()).isEqualTo(401);assertThat(r.getHeader("Set-Cookie")).isNull();}}
+            assertThat(success).isEqualTo(1);assertThat(winner).isNotNull().isNotEqualTo(session.refreshToken());
+            assertThatThrownBy(()->authService.refresh(session.refreshToken(),metadata)).isInstanceOf(IdentityException.class);
+            assertThat(authService.refresh(winner,metadata).response().user().id()).isEqualTo(user.getId());
+        } finally {go.countDown();pool.shutdownNow();}
+    }
+    @Test void lockedExpiredRevokedAndStaleCookieSessionsFailClosed() throws Exception {
+        var user=activate(uniqueEmail("auth-security"));var session=authService.login(new LoginRequest(user.getEmail(),"Password123!"),metadata);
+        var principal=jwtService.parseAccessToken(session.response().accessToken());
+        String expired=io.jsonwebtoken.Jwts.builder().subject(user.getId().toString()).claim("sid",principal.sessionId().toString()).claim("roles",java.util.List.of("ADMIN"))
+            .expiration(java.util.Date.from(Instant.now().minusSeconds(60))).signWith(io.jsonwebtoken.security.Keys.hmacShaKeyFor("test-only-secret-that-is-at-least-32-bytes-long".getBytes(java.nio.charset.StandardCharsets.UTF_8))).compact();
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/users/me").header("Authorization","Bearer "+expired)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isUnauthorized());
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/auth/logout").header("Authorization","Bearer "+session.response().accessToken()).cookie(new jakarta.servlet.http.Cookie("sporthub_refresh","invalid-stale-cookie")))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isNoContent());
+        assertThatThrownBy(()->sessionValidation.validate(principal)).isInstanceOf(IllegalArgumentException.class);
+        var next=authService.login(new LoginRequest(user.getEmail(),"Password123!"),metadata);jdbc.update("UPDATE users SET status='LOCKED' WHERE id=?",user.getId());
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/users/me/access").header("Authorization","Bearer "+next.response().accessToken())).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isUnauthorized());
+        assertThatThrownBy(()->authService.refresh(next.refreshToken(),metadata)).isInstanceOf(IdentityException.class);
+        assertThatThrownBy(()->authService.login(new LoginRequest(user.getEmail(),"Password123!"),metadata)).isInstanceOf(IdentityException.class);
+    }
+    @Test void authCookieAndResponseArePrivateAndUntrustedBrowserOriginsCannotRotate() throws Exception {
+        var user=activate(uniqueEmail("origin-cookie"));
+        var result=http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/auth/login").header("Origin","http://localhost:3000").contentType("application/json")
+            .content("{\"identifier\":\""+user.getEmail()+"\",\"password\":\"Password123!\"}")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andReturn();
+        String cookie=result.getResponse().getHeader("Set-Cookie");assertThat(cookie).contains("HttpOnly","SameSite=Lax","Path=/api/v1/auth");
+        assertThat(result.getResponse().getContentAsString()).doesNotContain("refreshToken","passwordHash","codeHash","tokenHash");
+        var refresh=org.springframework.mock.web.MockCookie.parse(result.getResponse().getHeader("Set-Cookie"));
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/auth/refresh").header("Origin","https://attacker.invalid").cookie(refresh))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+        assertThat(authService.refresh(refresh.getValue(),metadata).response().user().id()).isEqualTo(user.getId());
+    }
+    @Test void removedStaffRoleAndRevokedBindingAreNotReturnedInAccessContext() throws Exception {
+        var user=activate(uniqueEmail("binding-scope"));user.getRoles().add(Role.STAFF);userRepository.saveAndFlush(user);
+        UUID facility=UUID.randomUUID(),binding=UUID.randomUUID();jdbc.update("INSERT INTO staff_facility_bindings(id,staff_user_id,facility_id,assigned_by) VALUES(?,?,?,?)",binding,user.getId(),facility,user.getId());
+        jdbc.update("INSERT INTO staff_permissions(binding_id,permission) VALUES(?,'BOOKING_READ')",binding);
+        var token=authService.login(new LoginRequest(user.getEmail(),"Password123!"),metadata).response().accessToken();
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/users/me/access").header("Authorization","Bearer "+token)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.facilityBindings[0].facilityId").value(facility.toString()));
+        jdbc.update("UPDATE staff_facility_bindings SET is_active=false WHERE id=?",binding);
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/users/me/access").header("Authorization","Bearer "+token)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.facilityBindings").isEmpty());
+        jdbc.update("UPDATE staff_facility_bindings SET is_active=true WHERE id=?",binding);jdbc.update("DELETE FROM user_roles WHERE user_id=? AND role='STAFF'",user.getId());
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/users/me/access").header("Authorization","Bearer "+token)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.facilityBindings").isEmpty());
+    }
+
+
+    @Autowired org.springframework.transaction.PlatformTransactionManager securityTransactions;
+    @Test void passwordResetCommitPreventsConcurrentLoginWithTheOldPassword() throws Exception {
+        var user=activate(uniqueEmail("reset-login-race"));authService.forgotPassword(new ForgotPasswordRequest(user.getEmail()),metadata);
+        var challenge=otpRepository.findByUserIdAndPurposeAndVerifiedFalse(user.getId(),OtpPurpose.PASSWORD_RESET).getFirst();
+        var locked=new java.util.concurrent.CountDownLatch(1);var commit=new java.util.concurrent.CountDownLatch(1);var pool=java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var reset=pool.submit(()->new org.springframework.transaction.support.TransactionTemplate(securityTransactions).execute(tx->{authService.resetPassword(new ResetPasswordRequest(challenge.getId(),resetCodes.get(user.getEmail()),"Replacement123!"),metadata);locked.countDown();try{if(!commit.await(10,java.util.concurrent.TimeUnit.SECONDS))throw new IllegalStateException("Test barrier timed out");}catch(InterruptedException e){throw new IllegalStateException(e);}return true;}));
+            assertThat(locked.await(10,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            var login=pool.submit(()->{try{authService.login(new LoginRequest(user.getEmail(),"Password123!"),metadata);return true;}catch(IdentityException denied){return false;}});
+            org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(5)).until(()->jdbc.queryForObject("SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND NOT granted AND database=(SELECT oid FROM pg_database WHERE datname=current_database())",Integer.class)>0);
+            commit.countDown();assertThat(reset.get(20,java.util.concurrent.TimeUnit.SECONDS)).isTrue();assertThat(login.get(20,java.util.concurrent.TimeUnit.SECONDS)).isFalse();
+            assertThat(authService.login(new LoginRequest(user.getEmail(),"Replacement123!"),metadata).response().user().id()).isEqualTo(user.getId());
+        }finally{commit.countDown();pool.shutdownNow();}
+    }
+    @Test void secureCookieConfigurationIsRespectedWithoutExposingRefreshTokenInJson() {
+        var user=activate(uniqueEmail("secure-cookie"));var session=authService.login(new LoginRequest(user.getEmail(),"Password123!"),metadata);
+        var auth=org.mockito.Mockito.mock(AuthService.class);org.mockito.Mockito.when(auth.login(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any())).thenReturn(session);
+        var controller=new com.sporthub.identity.web.AuthController(auth,org.mockito.Mockito.mock(OwnerSignupService.class),new com.sporthub.identity.config.IdentityProperties(15,15,"https://sports.test","noreply@sports.test",true));
+        var response=controller.login(new LoginRequest(user.getEmail(),"Password123!"),new org.springframework.mock.web.MockHttpServletRequest());
+        assertThat(response.getHeaders().getFirst("Set-Cookie")).contains("Secure","HttpOnly","SameSite=Lax","Path=/api/v1/auth");
+        assertThat(session.response().user().roles()).containsExactly(Role.CUSTOMER);
+        assertThat(userRepository.findById(user.getId()).orElseThrow().getPasswordHash()).startsWith("$2").isNotEqualTo("Password123!");
+    }
+
+    @Test void signedRoleClaimsCannotEscalateAndMissingExpiryOrMismatchedSessionIsRejected() throws Exception {
+        var user=activate(uniqueEmail("jwt-claims"));var other=activate(uniqueEmail("jwt-other"));var session=authService.login(new LoginRequest(user.getEmail(),"Password123!"),metadata);
+        String sid=jwtService.parseAccessToken(session.response().accessToken()).sessionId().toString();
+        var key=io.jsonwebtoken.security.Keys.hmacShaKeyFor("test-only-secret-that-is-at-least-32-bytes-long".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String escalated=io.jsonwebtoken.Jwts.builder().subject(user.getId().toString()).claim("sid",sid).claim("roles",java.util.List.of("ADMIN"))
+            .expiration(java.util.Date.from(Instant.now().plusSeconds(60))).signWith(key).compact();
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/admin/accounts").header("Authorization","Bearer "+escalated)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+        String missingExpiry=io.jsonwebtoken.Jwts.builder().subject(user.getId().toString()).claim("sid",sid).claim("roles",java.util.List.of("CUSTOMER")).signWith(key).compact();
+        String mismatched=io.jsonwebtoken.Jwts.builder().subject(other.getId().toString()).claim("sid",sid).claim("roles",java.util.List.of("CUSTOMER"))
+            .expiration(java.util.Date.from(Instant.now().plusSeconds(60))).signWith(key).compact();
+        for(String token:java.util.List.of(missingExpiry,mismatched)) {
+            http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/users/me").header("Authorization","Bearer "+token)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isUnauthorized());
+        }
+        jdbc.update("UPDATE refresh_tokens SET expires_at=NOW()-interval '1 second' WHERE id=?",java.util.UUID.fromString(sid));
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/auth/refresh").cookie(new jakarta.servlet.http.Cookie("sporthub_refresh",session.refreshToken())))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isUnauthorized()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().doesNotExist("Set-Cookie"));
+    }
+    @Test void loginThrottleIsEnforcedBeforeCredentialsAndExistingApiErrorShapeIsPreserved() throws Exception {
+        org.mockito.Mockito.doThrow(new IdentityException(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,"IDENTITY-LOGIN-THROTTLED","Too many sign-in attempts. Please try again later"))
+            .when(loginAttempts).reserve(org.mockito.ArgumentMatchers.eq("throttled@test.invalid"));
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/auth/login").contentType("application/json")
+            .content("{\"identifier\":\"throttled@test.invalid\",\"password\":\"Password123!\"}"))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isTooManyRequests())
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value("IDENTITY-LOGIN-THROTTLED"));
+        org.mockito.Mockito.reset(loginAttempts);
+    }
+
+
+    @Test void concurrentProfileChangeCannotRestoreActiveStatusAfterAdminLock() throws Exception {
+        var user=activate(uniqueEmail("lock-profile-race"));var admin=applicationAdmin();var locked=new java.util.concurrent.CountDownLatch(1);var commit=new java.util.concurrent.CountDownLatch(1);var attempted=new java.util.concurrent.CountDownLatch(1);
+        var pool=java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var lock=pool.submit(()->new org.springframework.transaction.support.TransactionTemplate(securityTransactions).execute(tx->{adminAccounts.lock(user.getId(),new AdminAccountDtos.LockInput("Security test lock","PERMANENT"),admin,metadata);locked.countDown();try{if(!commit.await(10,java.util.concurrent.TimeUnit.SECONDS))throw new IllegalStateException("Test barrier timed out");}catch(InterruptedException e){throw new IllegalStateException(e);}return true;}));
+            assertThat(locked.await(10,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            var profile=pool.submit(()->{attempted.countDown();try{profileService.update(user.getId(),new UpdateProfileRequest(null,uniqueEmail("blocked-contact"),null,null,null),metadata);return true;}catch(IdentityException denied){assertThat(denied.getStatus().value()).isEqualTo(403);return false;}});
+            assertThat(attempted.await(5,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(5)).until(()->jdbc.queryForObject("SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND NOT granted AND database=(SELECT oid FROM pg_database WHERE datname=current_database())",Integer.class)>0);
+            commit.countDown();
+            assertThat(lock.get(20,java.util.concurrent.TimeUnit.SECONDS)).isTrue();assertThat(profile.get(20,java.util.concurrent.TimeUnit.SECONDS)).isFalse();
+            assertThat(userRepository.findById(user.getId()).orElseThrow().getStatus()).isEqualTo(AccountStatus.LOCKED);
+        }finally{commit.countDown();pool.shutdownNow();}
+    }
+
+    @Test void cookieOnlyLogoutIsAuditedAndRevokesTheUnderlyingAccessSession() {
+        var user=activate(uniqueEmail("cookie-only-audit"));var session=authService.login(new LoginRequest(user.getEmail(),"Password123!"),metadata);
+        authService.logout(session.refreshToken(),null,null,metadata);
+        assertThatThrownBy(()->sessionValidation.validate(jwtService.parseAccessToken(session.response().accessToken()))).isInstanceOf(IllegalArgumentException.class);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE user_id=? AND action='LOGOUT' AND entity_type='USER' AND entity_id=?",Integer.class,user.getId(),user.getId())).isEqualTo(1);
+    }
+
+    @Test void passwordResetCodeForReplacedContactCannotChangeTheAccountPassword() {
+        var user=activate(uniqueEmail("reset-old-contact"));String originalHash=user.getPasswordHash();
+        authService.forgotPassword(new ForgotPasswordRequest(user.getEmail()),metadata);
+        var oldReset=otpRepository.findByUserIdAndPurposeAndVerifiedFalse(user.getId(),OtpPurpose.PASSWORD_RESET).getFirst();String oldCode=resetCodes.get(user.getEmail());
+        String replacement=uniqueEmail("reset-new-contact");profileService.update(user.getId(),new UpdateProfileRequest(null,replacement,null,null,null),metadata);
+        var change=profileService.contactChallenges(user.getId()).getFirst();authService.verify(new VerificationRequest(null,change.id(),verificationCodes.get(replacement)),metadata);
+        assertThatThrownBy(()->authService.resetPassword(new ResetPasswordRequest(oldReset.getId(),oldCode,"Replacement123!"),metadata)).isInstanceOf(IdentityException.class);
+        assertThat(userRepository.findById(user.getId()).orElseThrow().getPasswordHash()).isEqualTo(originalHash);
+        authService.forgotPassword(new ForgotPasswordRequest(replacement),metadata);
+        var current=otpRepository.findByUserIdAndPurposeAndVerifiedFalse(user.getId(),OtpPurpose.PASSWORD_RESET).getFirst();
+        authService.resetPassword(new ResetPasswordRequest(current.getId(),resetCodes.get(replacement),"Replacement123!"),metadata);
+        assertThat(authService.login(new LoginRequest(replacement,"Replacement123!"),metadata).response().user().id()).isEqualTo(user.getId());
+    }
+
+    @Test void replacedPhoneInvalidatesItsResetCodeAndLockedAccountCannotVerifyContactChange() {
+        var user=activate(uniqueEmail("reset-phone-contact"));String oldPhone=uniquePhone(),newPhone=uniquePhone();
+        profileService.update(user.getId(),new UpdateProfileRequest(null,null,oldPhone,null,null),metadata);var first=profileService.contactChallenges(user.getId()).getFirst();
+        authService.verify(new VerificationRequest(null,first.id(),verificationCodes.get(oldPhone)),metadata);
+        authService.forgotPassword(new ForgotPasswordRequest(oldPhone),metadata);var reset=otpRepository.findByUserIdAndPurposeAndVerifiedFalse(user.getId(),OtpPurpose.PASSWORD_RESET).getFirst();String oldCode=resetCodes.get(oldPhone);
+        profileService.update(user.getId(),new UpdateProfileRequest(null,null,newPhone,null,null),metadata);var replacement=profileService.contactChallenges(user.getId()).getFirst();
+        authService.verify(new VerificationRequest(null,replacement.id(),verificationCodes.get(newPhone)),metadata);
+        assertThatThrownBy(()->authService.resetPassword(new ResetPasswordRequest(reset.getId(),oldCode,"Replacement123!"),metadata)).isInstanceOf(IdentityException.class);
+        authService.forgotPassword(new ForgotPasswordRequest(newPhone),metadata);var valid=otpRepository.findByUserIdAndPurposeAndVerifiedFalse(user.getId(),OtpPurpose.PASSWORD_RESET).getFirst();
+        authService.resetPassword(new ResetPasswordRequest(valid.getId(),resetCodes.get(newPhone),"Replacement123!"),metadata);
+        String newEmail=uniqueEmail("locked-contact-target");profileService.update(user.getId(),new UpdateProfileRequest(null,newEmail,null,null,null),metadata);var change=profileService.contactChallenges(user.getId()).getFirst();
+        jdbc.update("UPDATE users SET status='LOCKED' WHERE id=?",user.getId());
+        assertThatThrownBy(()->authService.verify(new VerificationRequest(null,change.id(),verificationCodes.get(newEmail)),metadata)).isInstanceOf(IdentityException.class).hasMessage("Account is not active");
+        assertThat(userRepository.findById(user.getId()).orElseThrow().getEmail()).isEqualTo(user.getEmail());
+        assertThat(userRepository.findById(user.getId()).orElseThrow().getStatus()).isEqualTo(AccountStatus.LOCKED);
+    }
+    private com.sporthub.identity.security.AuthenticatedUser staffOwner(UUID facility){var u=activate(uniqueEmail("staff-owner"));u.getRoles().add(Role.OWNER);userRepository.saveAndFlush(u);staffFacilityOwners.put(facility,u.getId());return applicant(u);}
+    private StaffBindingService.Profile staffProfile(UUID facility,com.sporthub.identity.security.AuthenticatedUser owner){return staff.createProfile(facility,new StaffBindingService.ProfileInput("Nhân viên sân",null,null,true),owner,"Bearer fixture");}
+    private StaffBindingService.Binding linkStaff(UUID facility,com.sporthub.identity.security.AuthenticatedUser owner,User user,java.util.Set<String> permissions){var profile=staffProfile(facility,owner);var input=new StaffBindingService.Input(user.getEmail(),permissions);var invite=staff.invite(facility,profile.id(),input,owner,"Bearer fixture");staff.respond(invite.id(),true,applicant(user));return staff.assign(facility,input,owner,"Bearer fixture");}
+
+    @Test void staffProfilesAreIndependentValidatedAndOwnerScoped(){
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);int users=jdbc.queryForObject("SELECT count(*) FROM users",Integer.class);var p=staffProfile(f,owner);assertThat(p.userId()).isNull();assertThat(p.linked()).isFalse();assertThat(jdbc.queryForObject("SELECT count(*) FROM users",Integer.class)).isEqualTo(users);
+        assertThat(staff.profiles(f,owner,"Bearer fixture")).containsExactly(p);
+        assertThatThrownBy(()->staffProfile(f,applicant(activate(uniqueEmail("customer-staff-denied"))))).isInstanceOf(com.sporthub.common.exception.ForbiddenException.class);
+        assertThatThrownBy(()->staff.profiles(UUID.randomUUID(),owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ForbiddenException.class);
+        assertThatThrownBy(()->staff.createProfile(f,new StaffBindingService.ProfileInput("  ","invalid",null,true),owner,"Bearer fixture")).isInstanceOf(IllegalArgumentException.class);
+        assertThat(staff.history(f,p.id(),owner,"Bearer fixture")).extracting(StaffBindingService.History::action).containsExactly("STAFF_PROFILE_CREATED");
+    }
+    @Test void staffLookupIsExactVerifiedPrivateAndCannotEnumerateOrSelectAdmins() throws Exception {
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);var u=activate(uniqueEmail("staff-lookup"));var candidate=staff.lookup(f,u.getEmail().toUpperCase(java.util.Locale.ROOT),owner,"Bearer fixture");assertThat(candidate.userId()).isEqualTo(u.getId());assertThat(candidate.maskedIdentifier()).doesNotContain(u.getEmail());
+        var body=new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(candidate);assertThat(body.fieldNames()).toIterable().containsExactlyInAnyOrder("userId","fullName","maskedIdentifier");
+        assertThatThrownBy(()->staff.lookup(f,"%@example.test",owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ResourceNotFoundException.class);
+        var pending=authService.register(registration(uniqueEmail("pending-staff"),null),metadata);assertThatThrownBy(()->staff.lookup(f,userRepository.findById(pending.userId()).orElseThrow().getEmail(),owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ResourceNotFoundException.class);
+        var admin=applicationAdmin();assertThatThrownBy(()->staff.lookup(f,admin.email(),owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ResourceNotFoundException.class);
+        var unverifiedPhone=uniquePhone();jdbc.update("UPDATE users SET phone=?,phone_verified=false WHERE id=?",unverifiedPhone,u.getId());assertThatThrownBy(()->staff.lookup(f,unverifiedPhone,owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ResourceNotFoundException.class);
+    }
+    @Test void staffCannotBeLinkedWithoutConsentAndInvitationIsRecipientOnly(){
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);var u=activate(uniqueEmail("staff-consent"));var outsider=activate(uniqueEmail("staff-outsider"));var p=staffProfile(f,owner);var input=new StaffBindingService.Input(u.getEmail(),java.util.Set.of("BOOKING_READ"));
+        assertThatThrownBy(()->staff.assign(f,input,owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ConflictException.class).hasMessageContaining("accept");
+        var invitation=staff.invite(f,p.id(),input,owner,"Bearer fixture");assertThat(staff.invite(f,p.id(),input,owner,"Bearer fixture").id()).isEqualTo(invitation.id());assertThat(staff.invitations(applicant(outsider))).isEmpty();assertThatThrownBy(()->staff.respond(invitation.id(),true,applicant(outsider))).isInstanceOf(com.sporthub.common.exception.ForbiddenException.class);
+        staff.respond(invitation.id(),true,applicant(u));assertThat(staff.respond(invitation.id(),true,applicant(u)).state()).isEqualTo("ACCEPTED");
+        assertThatThrownBy(()->staff.assign(f,new StaffBindingService.Input(u.getEmail(),java.util.Set.of("SCHEDULE_MANAGE")),owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ConflictException.class);
+        var before=authService.login(new LoginRequest(u.getEmail(),"Password123!"),metadata);var binding=staff.assign(f,input,owner,"Bearer fixture");assertThat(binding.userId()).isEqualTo(u.getId());assertThat(staff.assign(f,input,owner,"Bearer fixture").id()).isEqualTo(binding.id());
+        assertThat(userRepository.findById(u.getId()).orElseThrow().getRoles()).containsExactlyInAnyOrder(Role.CUSTOMER,Role.STAFF);
+        assertThatThrownBy(()->sessionValidation.validate(jwtService.parseAccessToken(before.response().accessToken()))).isInstanceOf(IllegalArgumentException.class);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_id=? AND action='STAFF_ASSIGNED'",Integer.class,binding.id())).isEqualTo(1);
+    }
+    @Test void declinedExpiredCancelledAndInactiveProfilesCannotGrantAccess(){
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);var u=activate(uniqueEmail("staff-invalid-invitation"));var p=staffProfile(f,owner);var input=new StaffBindingService.Input(u.getEmail(),java.util.Set.of("BOOKING_READ"));var first=staff.invite(f,p.id(),input,owner,"Bearer fixture");staff.respond(first.id(),false,applicant(u));assertThatThrownBy(()->staff.respond(first.id(),true,applicant(u))).isInstanceOf(com.sporthub.common.exception.ConflictException.class);
+        var second=staff.invite(f,p.id(),input,owner,"Bearer fixture");jdbc.update("UPDATE staff_invitations SET created_at=NOW()-INTERVAL '2 days',expires_at=NOW()-INTERVAL '1 day' WHERE id=?",second.id());assertThatThrownBy(()->staff.respond(second.id(),true,applicant(u))).isInstanceOf(com.sporthub.common.exception.ConflictException.class);
+        var third=staff.invite(f,p.id(),input,owner,"Bearer fixture");staff.respond(third.id(),true,applicant(u));staff.cancelInvitation(f,p.id(),owner,"Bearer fixture");assertThatThrownBy(()->staff.assign(f,input,owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ConflictException.class);
+        var fourth=staff.invite(f,p.id(),input,owner,"Bearer fixture");staff.respond(fourth.id(),true,applicant(u));staff.updateProfile(f,p.id(),new StaffBindingService.ProfileUpdate(p.fullName(),null,null,false,p.version()),owner,"Bearer fixture");assertThatThrownBy(()->staff.assign(f,input,owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ConflictException.class);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM staff_facility_bindings WHERE facility_id=?",Integer.class,f)).isZero();
+    }
+    @Test void staffPermissionsAndRevocationApplyToTheExistingSessionAtNextRequest() throws Exception {
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);var u=activate(uniqueEmail("staff-live"));var b=linkStaff(f,owner,u,java.util.Set.of("BOOKING_READ","SCHEDULE_MANAGE"));String token=authService.login(new LoginRequest(u.getEmail(),"Password123!"),metadata).response().accessToken();var get=org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/users/me/access").header("Authorization","Bearer "+token);
+        http.perform(get).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.facilityBindings[0].permissions").isNotEmpty());
+        var v=staff.permissions(f,b.id(),owner,"Bearer fixture");staff.updatePermissions(f,b.id(),new StaffBindingService.PermissionsInput(java.util.Set.of(),v.version()),owner,"Bearer fixture");
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/users/me/access").header("Authorization","Bearer "+token)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.facilityBindings[0].permissions").isEmpty());
+        staff.revoke(f,b.id(),owner,"Bearer fixture");staff.revoke(f,b.id(),owner,"Bearer fixture");http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/users/me/access").header("Authorization","Bearer "+token)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.facilityBindings").isEmpty());
+        assertThat(userRepository.findById(u.getId())).isPresent();assertThatThrownBy(()->staff.updatePermissions(f,b.id(),new StaffBindingService.PermissionsInput(java.util.Set.of("BOOKING_READ"),v.version()),owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ConflictException.class);
+        assertThatThrownBy(()->staff.assign(f,new StaffBindingService.Input(u.getEmail(),java.util.Set.of("BOOKING_READ")),owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ConflictException.class);
+        var p=staff.profiles(f,owner,"Bearer fixture").getFirst();assertThat(staff.history(f,p.id(),owner,"Bearer fixture")).extracting(StaffBindingService.History::action).contains("STAFF_PERMISSIONS_CHANGED","STAFF_REVOKED");
+    }
+    @Test void staffCannotEscalatePermissionsOrWriteAnotherFacility(){
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);var u=activate(uniqueEmail("staff-no-escalation"));var b=linkStaff(f,owner,u,java.util.Set.of("BOOKING_READ"));var p=staff.permissions(f,b.id(),owner,"Bearer fixture");
+        for(String permission:java.util.List.of("OWNER","ADMIN","PRICING_MANAGE","REFUND"))assertThatThrownBy(()->staff.updatePermissions(f,b.id(),new StaffBindingService.PermissionsInput(java.util.Set.of(permission),p.version()),owner,"Bearer fixture")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(()->staff.revoke(UUID.randomUUID(),b.id(),owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ForbiddenException.class);
+        assertThatThrownBy(()->staff.list(f,applicant(userRepository.findById(u.getId()).orElseThrow()),"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ForbiddenException.class);
+        assertThat(staff.permissions(f,b.id(),owner,"Bearer fixture").version()).isEqualTo(p.version());
+    }
+    @Test void inactiveStaffProfileRevokesBindingAndStaleEditCannotRestoreIt(){
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);var u=activate(uniqueEmail("staff-profile-status"));var b=linkStaff(f,owner,u,java.util.Set.of("BOOKING_READ"));var p=staff.profiles(f,owner,"Bearer fixture").getFirst();var after=staff.updateProfile(f,p.id(),new StaffBindingService.ProfileUpdate("Nhân viên mới",null,null,false,p.version()),owner,"Bearer fixture");assertThat(after.linked()).isFalse();assertThat(staff.list(f,owner,"Bearer fixture").getFirst().active()).isFalse();
+        assertThatThrownBy(()->staff.updateProfile(f,p.id(),new StaffBindingService.ProfileUpdate(p.fullName(),null,null,true,p.version()),owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ConflictException.class);
+        assertThat(userRepository.findById(u.getId()).orElseThrow().getStatus()).isEqualTo(AccountStatus.ACTIVE);
+    }
+    @Test void concurrentStaffLinksConsumeOneInvitationAndCreateOneBinding() throws Exception {
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);var u=activate(uniqueEmail("staff-link-race"));var p=staffProfile(f,owner);var input=new StaffBindingService.Input(u.getEmail(),java.util.Set.of("BOOKING_READ"));var invite=staff.invite(f,p.id(),input,owner,"Bearer fixture");staff.respond(invite.id(),true,applicant(u));
+        try(var pool=java.util.concurrent.Executors.newFixedThreadPool(2)){var ready=new java.util.concurrent.CountDownLatch(2);var go=new java.util.concurrent.CountDownLatch(1);var calls=new java.util.ArrayList<java.util.concurrent.Future<UUID>>();for(int i=0;i<2;i++)calls.add(pool.submit(()->{ready.countDown();go.await();return staff.assign(f,input,owner,"Bearer fixture").id();}));assertThat(ready.await(5,java.util.concurrent.TimeUnit.SECONDS)).isTrue();go.countDown();assertThat(calls.get(0).get(10,java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(calls.get(1).get(10,java.util.concurrent.TimeUnit.SECONDS));}
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM staff_facility_bindings WHERE facility_id=?",Integer.class,f)).isEqualTo(1);assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE action='STAFF_ASSIGNED' AND entity_id=(SELECT id FROM staff_facility_bindings WHERE facility_id=?)",Integer.class,f)).isEqualTo(1);
+    }
+    @Test void concurrentPermissionUpdatesHaveOneWinnerAndNeverMixSets() throws Exception {
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);var u=activate(uniqueEmail("staff-permission-race"));var b=linkStaff(f,owner,u,java.util.Set.of("BOOKING_READ"));long version=staff.permissions(f,b.id(),owner,"Bearer fixture").version();
+        try(var pool=java.util.concurrent.Executors.newFixedThreadPool(2)){var ready=new java.util.concurrent.CountDownLatch(2);var go=new java.util.concurrent.CountDownLatch(1);var calls=new java.util.ArrayList<java.util.concurrent.Future<Boolean>>();for(var permissions:java.util.List.of(java.util.Set.of("SCHEDULE_MANAGE"),java.util.Set.of("COURT_MAINTENANCE_MANAGE")))calls.add(pool.submit(()->{ready.countDown();go.await();try{staff.updatePermissions(f,b.id(),new StaffBindingService.PermissionsInput(permissions,version),owner,"Bearer fixture");return true;}catch(com.sporthub.common.exception.ConflictException ex){return false;}}));assertThat(ready.await(5,java.util.concurrent.TimeUnit.SECONDS)).isTrue();go.countDown();assertThat(java.util.List.of(calls.get(0).get(10,java.util.concurrent.TimeUnit.SECONDS),calls.get(1).get(10,java.util.concurrent.TimeUnit.SECONDS))).containsExactlyInAnyOrder(true,false);}
+        assertThat(staff.permissions(f,b.id(),owner,"Bearer fixture").permissions()).hasSize(1);assertThat(staff.permissions(f,b.id(),owner,"Bearer fixture").version()).isEqualTo(version+1);
+    }
+    @Test void staffPermissionUpdateAndRevokeRaceCannotReactivateAccess() throws Exception {
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);var u=activate(uniqueEmail("staff-revoke-race"));var b=linkStaff(f,owner,u,java.util.Set.of("BOOKING_READ"));long v=staff.permissions(f,b.id(),owner,"Bearer fixture").version();
+        try(var pool=java.util.concurrent.Executors.newFixedThreadPool(2)){var go=new java.util.concurrent.CountDownLatch(1);var update=pool.submit(()->{go.await();try{staff.updatePermissions(f,b.id(),new StaffBindingService.PermissionsInput(java.util.Set.of("SCHEDULE_MANAGE"),v),owner,"Bearer fixture");}catch(com.sporthub.common.exception.ConflictException expected){}return null;});var revoke=pool.submit(()->{go.await();staff.revoke(f,b.id(),owner,"Bearer fixture");return null;});go.countDown();update.get(10,java.util.concurrent.TimeUnit.SECONDS);revoke.get(10,java.util.concurrent.TimeUnit.SECONDS);}
+        assertThat(staff.list(f,owner,"Bearer fixture").getFirst().active()).isFalse();
+    }
+    @Test void accountSuspensionDeactivationAndReactivationPreserveHistoryAndNeverRestoreSessions() throws Exception {
+        var u=activate(uniqueEmail("account-lifecycle"));var admin=applicationAdmin();var login=authService.login(new LoginRequest(u.getEmail(),"Password123!"),metadata);var reason=new AdminAccountDtos.Reason("Administrative account review");assertThat(adminAccounts.suspend(u.getId(),reason,admin,metadata).status()).isEqualTo(AccountStatus.SUSPENDED);
+        assertThatThrownBy(()->authService.login(new LoginRequest(u.getEmail(),"Password123!"),metadata)).isInstanceOf(IdentityException.class);assertThatThrownBy(()->authService.refresh(login.refreshToken(),metadata)).isInstanceOf(IdentityException.class);
+        assertThat(adminAccounts.deactivate(u.getId(),reason,admin,metadata).status()).isEqualTo(AccountStatus.DEACTIVATED);assertThat(adminAccounts.reactivate(u.getId(),reason,admin,metadata).status()).isEqualTo(AccountStatus.ACTIVE);
+        assertThatThrownBy(()->sessionValidation.validate(jwtService.parseAccessToken(login.response().accessToken()))).isInstanceOf(IllegalArgumentException.class);assertThat(authService.login(new LoginRequest(u.getEmail(),"Password123!"),metadata).response().user().status()).isEqualTo(AccountStatus.ACTIVE);
+        var detail=adminAccounts.detail(u.getId(),admin);assertThat(detail.audit()).extracting(AdminAccountDtos.Audit::action).contains("ADMIN_ACCOUNT_SUSPENDED","ADMIN_ACCOUNT_DEACTIVATED","ADMIN_ACCOUNT_ACTIVE");assertThat(detail.account().roles()).containsExactly(Role.CUSTOMER);assertThat(jdbc.queryForObject("SELECT count(*) FROM identity_notifications WHERE user_id=?",Integer.class,u.getId())).isEqualTo(3);
+    }
+    @Test void accountStatusCommandsRejectSelfOtherAdminsCustomersUnverifiedAndInvalidTransitions(){
+        var admin=applicationAdmin();var other=applicationAdmin();var customer=activate(uniqueEmail("account-guard"));var reason=new AdminAccountDtos.Reason("Valid administrative reason");
+        for(var target:java.util.List.of(admin.userId(),other.userId())){assertThatThrownBy(()->adminAccounts.suspend(target,reason,admin,metadata)).isInstanceOf(IdentityException.class);assertThatThrownBy(()->adminAccounts.deactivate(target,reason,admin,metadata)).isInstanceOf(IdentityException.class);assertThatThrownBy(()->adminAccounts.reactivate(target,reason,admin,metadata)).isInstanceOf(IdentityException.class);}
+        assertThatThrownBy(()->adminAccounts.deactivate(customer.getId(),reason,applicant(customer),metadata)).isInstanceOf(IdentityException.class);assertThatThrownBy(()->adminAccounts.reactivate(customer.getId(),reason,admin,metadata)).isInstanceOf(IdentityException.class);
+        var pending=authService.register(registration(uniqueEmail("account-unverified"),null),metadata);assertThatThrownBy(()->adminAccounts.deactivate(pending.userId(),reason,admin,metadata)).isInstanceOf(IdentityException.class);
+        adminAccounts.lock(customer.getId(),new AdminAccountDtos.LockInput("Review","PERMANENT"),admin,metadata);assertThatThrownBy(()->adminAccounts.reactivate(customer.getId(),reason,admin,metadata)).isInstanceOf(IdentityException.class);assertThat(adminAccounts.unlock(customer.getId(),reason,admin,metadata).status()).isEqualTo(AccountStatus.ACTIVE);
+    }
+    @Test void concurrentAccountStatusAndRoleUpdatesDoNotLoseEitherChange() throws Exception {
+        var admin=applicationAdmin();var u=activate(uniqueEmail("account-status-role-race"));try(var pool=java.util.concurrent.Executors.newFixedThreadPool(2)){var go=new java.util.concurrent.CountDownLatch(1);var status=pool.submit(()->{go.await();return adminAccounts.deactivate(u.getId(),new AdminAccountDtos.Reason("Concurrent security review"),admin,metadata);});var role=pool.submit(()->{go.await();return adminAccounts.roles(u.getId(),new AdminAccountDtos.RolesInput(java.util.Set.of(Role.CUSTOMER,Role.STAFF),"Concurrent role update"),admin,metadata);});go.countDown();status.get(10,java.util.concurrent.TimeUnit.SECONDS);role.get(10,java.util.concurrent.TimeUnit.SECONDS);}
+        var account=userRepository.findById(u.getId()).orElseThrow();assertThat(account.getStatus()).isEqualTo(AccountStatus.DEACTIVATED);assertThat(account.getRoles()).containsExactlyInAnyOrder(Role.CUSTOMER,Role.STAFF);
+    }
+    @Test void ownerActivationPausedByDeactivationResumesOnlyAfterAccountReactivation(){
+        var u=activate(uniqueEmail("owner-deactivation-saga"));var actor=applicant(u);var admin=applicationAdmin();var app=applications.create(applicationInput(),actor);applications.submit(app.id(),actor,null);
+        org.mockito.Mockito.doAnswer(a->{adminAccounts.deactivate(u.getId(),new AdminAccountDtos.Reason("Applicant temporarily unavailable"),admin,metadata);return null;}).when(applicationDependencies).wallet(any(),any(),any());
+        assertThat(applications.decide(app.id(),new OwnerApplicationDtos.Decision("APPROVE","Approved after review",new java.math.BigDecimal("10")),admin).state()).isEqualTo("APPROVING");assertThat(userRepository.findById(u.getId()).orElseThrow().getRoles()).doesNotContain(Role.OWNER);assertThat(applications.committed(java.util.List.of(app.id()))).isEmpty();
+        adminAccounts.reactivate(u.getId(),new AdminAccountDtos.Reason("Applicant verified after review"),admin,metadata);org.mockito.Mockito.doReturn(new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode()).when(applicationDependencies).wallet(any(),any(),any());assertThat(applications.retry(app.id(),admin).state()).isEqualTo("APPROVED");assertThat(applications.committed(java.util.List.of(app.id()))).containsExactly(app.id());assertThat(jdbc.queryForObject("SELECT count(*) FROM owner_profiles WHERE user_id=? AND approval_status='APPROVED'",Integer.class,u.getId())).isEqualTo(1);
+    }
+
+    @Test void staffHttpFlowRequiresRealSessionConsentAndReturnsOnlySafeLookupFields() throws Exception {
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);var u=activate(uniqueEmail("staff-http"));String base="/api/v1/staff-profiles/facilities/"+f;String ownerToken=authService.login(new LoginRequest(owner.email(),"Password123!"),metadata).response().accessToken();String userToken=authService.login(new LoginRequest(u.getEmail(),"Password123!"),metadata).response().accessToken();
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(base)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isUnauthorized());http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(base).header("Authorization","Bearer "+userToken)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+        var mapper=new com.fasterxml.jackson.databind.ObjectMapper();var response=http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(base).header("Authorization","Bearer "+ownerToken).contentType("application/json").content("{\"fullName\":\"Staff HTTP\",\"active\":true}")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andReturn();UUID profile=UUID.fromString(mapper.readTree(response.getResponse().getContentAsString()).path("data").path("id").asText());
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/staff-bindings/facilities/"+f+"/account-lookup").header("Authorization","Bearer "+ownerToken).contentType("application/json").content(mapper.writeValueAsString(java.util.Map.of("identifier",u.getEmail())))).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.email").doesNotExist()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.roles").doesNotExist());
+        var input=new StaffBindingService.Input(u.getEmail(),java.util.Set.of("BOOKING_READ"));var invitation=staff.invite(f,profile,input,owner,"Bearer "+ownerToken);http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/users/me/staff-invitations/"+invitation.id()+"/accept").header("Authorization","Bearer "+userToken)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.state").value("ACCEPTED"));
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/staff-bindings/facilities/"+f).header("Authorization","Bearer "+ownerToken).contentType("application/json").content(mapper.writeValueAsString(input))).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/users/me/access").header("Authorization","Bearer "+userToken)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isUnauthorized());
+    }
+    @Test void staffLinkRollsBackRolesConsentBindingAndSessionRevocationWhenAuditFails(){
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);var u=activate(uniqueEmail("staff-rollback"));var p=staffProfile(f,owner);var input=new StaffBindingService.Input(u.getEmail(),java.util.Set.of("BOOKING_READ"));var invitation=staff.invite(f,p.id(),input,owner,"Bearer fixture");staff.respond(invitation.id(),true,applicant(u));var session=authService.login(new LoginRequest(u.getEmail(),"Password123!"),metadata);String name="phase08_audit_failure_"+UUID.randomUUID().toString().replace("-","");
+        jdbc.execute("CREATE FUNCTION "+name+"() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='STAFF_ASSIGNED' AND NEW.new_value->>'facilityId'='"+f+"' THEN RAISE EXCEPTION 'Synthetic Phase 08 audit failure'; END IF; RETURN NEW; END $$");jdbc.execute("CREATE TRIGGER "+name+" BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION "+name+"()");
+        assertThatThrownBy(()->staff.assign(f,input,owner,"Bearer fixture")).isInstanceOf(org.springframework.dao.DataAccessException.class);assertThat(jdbc.queryForObject("SELECT count(*) FROM staff_facility_bindings WHERE facility_id=?",Integer.class,f)).isZero();assertThat(jdbc.queryForObject("SELECT state FROM staff_invitations WHERE id=?",String.class,invitation.id())).isEqualTo("ACCEPTED");assertThat(userRepository.findById(u.getId()).orElseThrow().getRoles()).containsExactly(Role.CUSTOMER);assertThat(sessionValidation.validate(jwtService.parseAccessToken(session.response().accessToken())).userId()).isEqualTo(u.getId());
+        jdbc.execute("ALTER TABLE audit_log DISABLE TRIGGER "+name);assertThat(staff.assign(f,input,owner,"Bearer fixture").active()).isTrue();
+    }
+
+    @Test void removingAndRegrantingStaffRoleNeverResurrectsOldFacilityPermissions(){
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);var u=activate(uniqueEmail("staff-role-regrant"));var b=linkStaff(f,owner,u,java.util.Set.of("BOOKING_READ","SCHEDULE_MANAGE"));var admin=applicationAdmin();adminAccounts.roles(u.getId(),new AdminAccountDtos.RolesInput(java.util.Set.of(Role.CUSTOMER),"Staff employment access removed"),admin,metadata);assertThat(staff.list(f,owner,"Bearer fixture").getFirst().active()).isFalse();
+        adminAccounts.roles(u.getId(),new AdminAccountDtos.RolesInput(java.util.Set.of(Role.CUSTOMER,Role.STAFF),"Staff role restored without employment"),admin,metadata);assertThat(staff.list(f,owner,"Bearer fixture").getFirst().active()).isFalse();assertThatThrownBy(()->staff.assign(f,new StaffBindingService.Input(u.getEmail(),java.util.Set.of("BOOKING_READ")),owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ConflictException.class);
+        var p=staff.profiles(f,owner,"Bearer fixture").getFirst();assertThat(staff.history(f,p.id(),owner,"Bearer fixture")).extracting(StaffBindingService.History::action).contains("ADMIN_STAFF_ACCESS_REVOKED");
+        var input=new StaffBindingService.Input(u.getEmail(),java.util.Set.of("BOOKING_READ"));var invitation=staff.invite(f,p.id(),input,owner,"Bearer fixture");staff.respond(invitation.id(),true,applicant(userRepository.findById(u.getId()).orElseThrow()));assertThat(staff.assign(f,input,owner,"Bearer fixture").id()).isEqualTo(b.id());
+    }
+    @Test void adminStaffRoleRemovalAlsoCancelsAcceptedInvitations(){
+        UUID first=UUID.randomUUID(),second=UUID.randomUUID();var owner=staffOwner(first);staffFacilityOwners.put(second,owner.userId());var u=activate(uniqueEmail("staff-role-invitation"));linkStaff(first,owner,u,java.util.Set.of("BOOKING_READ"));var p=staffProfile(second,owner);var input=new StaffBindingService.Input(u.getEmail(),java.util.Set.of("SCHEDULE_MANAGE"));var invitation=staff.invite(second,p.id(),input,owner,"Bearer fixture");staff.respond(invitation.id(),true,applicant(userRepository.findById(u.getId()).orElseThrow()));
+        adminAccounts.roles(u.getId(),new AdminAccountDtos.RolesInput(java.util.Set.of(Role.CUSTOMER),"Revoke all Staff facility access"),applicationAdmin(),metadata);assertThat(jdbc.queryForObject("SELECT state FROM staff_invitations WHERE id=?",String.class,invitation.id())).isEqualTo("CANCELLED");assertThatThrownBy(()->staff.assign(second,input,owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ConflictException.class);
+    }
+
+    @Test void counterCustomerLookupRequiresLiveCounterPermissionAndVerifiedPhone() throws Exception {
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);var staffUser=activate(uniqueEmail("counter-lookup-staff"));var binding=linkStaff(f,owner,staffUser,java.util.Set.of("BOOKING_CREATE_COUNTER"));var customer=activate(uniqueEmail("counter-linked-customer"));String phone=uniquePhone();jdbc.update("UPDATE users SET phone=?,phone_verified=true WHERE id=?",phone,customer.getId());String token=authService.login(new LoginRequest(staffUser.getEmail(),"Password123!"),metadata).response().accessToken();var mapper=new com.fasterxml.jackson.databind.ObjectMapper();String path="/api/v1/users/counter-customer-lookup";
+        var result=http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path).header("Authorization","Bearer "+token).contentType("application/json").content(mapper.writeValueAsString(java.util.Map.of("facilityId",f,"phone",phone)))).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.customerId").value(customer.getId().toString())).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.phone").doesNotExist()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.fullName").doesNotExist()).andReturn();assertThat(result.getResponse().getContentAsString()).doesNotContain(phone);
+        var permission=staff.permissions(f,binding.id(),owner,"Bearer fixture");staff.updatePermissions(f,binding.id(),new StaffBindingService.PermissionsInput(java.util.Set.of("BOOKING_READ"),permission.version()),owner,"Bearer fixture");http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path).header("Authorization","Bearer "+token).contentType("application/json").content(mapper.writeValueAsString(java.util.Map.of("facilityId",f,"phone",phone)))).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+    }
+    @Test void counterLookupRejectsForeignStaffCustomerWildcardAndNeverMatchesInactiveUnverifiedAdmin() throws Exception {
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);var staffUser=activate(uniqueEmail("counter-lookup-scope"));linkStaff(f,owner,staffUser,java.util.Set.of("BOOKING_CREATE_COUNTER"));String token=authService.login(new LoginRequest(staffUser.getEmail(),"Password123!"),metadata).response().accessToken();var customer=activate(uniqueEmail("counter-lookup-ineligible"));String phone=uniquePhone();jdbc.update("UPDATE users SET phone=?,phone_verified=false WHERE id=?",phone,customer.getId());String path="/api/v1/users/counter-customer-lookup";var mapper=new com.fasterxml.jackson.databind.ObjectMapper();
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path).header("Authorization","Bearer "+token).contentType("application/json").content(mapper.writeValueAsString(java.util.Map.of("facilityId",f,"phone",phone)))).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.customerId").isEmpty());
+        jdbc.update("UPDATE users SET phone_verified=true,status='LOCKED' WHERE id=?",customer.getId());http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path).header("Authorization","Bearer "+token).contentType("application/json").content(mapper.writeValueAsString(java.util.Map.of("facilityId",f,"phone",phone)))).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.customerId").isEmpty());
+        for(String body:java.util.List.of(mapper.writeValueAsString(java.util.Map.of("facilityId",java.util.UUID.randomUUID(),"phone",phone)),mapper.writeValueAsString(java.util.Map.of("facilityId",f,"phone","%"))))http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path).header("Authorization","Bearer "+token).contentType("application/json").content(body)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().is4xxClientError());
+        var admin=applicationAdmin();String adminPhone=uniquePhone();jdbc.update("UPDATE users SET phone=?,phone_verified=true WHERE id=?",adminPhone,admin.userId());http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path).header("Authorization","Bearer "+token).contentType("application/json").content(mapper.writeValueAsString(java.util.Map.of("facilityId",f,"phone",adminPhone)))).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.customerId").isEmpty());
+    }
+    @Test void pendingCancellationPermissionCanBeAssignedButNeverImpliesPaidCancelOrRefund(){
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);var staffUser=activate(uniqueEmail("counter-cancel-permission"));var binding=linkStaff(f,owner,staffUser,java.util.Set.of("BOOKING_CANCEL_PENDING"));assertThat(staff.permissions(f,binding.id(),owner,"Bearer fixture").permissions()).containsExactly("BOOKING_CANCEL_PENDING");assertThat(staff.catalog(f,owner,"Bearer fixture")).contains("BOOKING_CANCEL_PENDING").doesNotContain("BOOKING_CANCEL_PAID","REFUND");
+    }
+
+
+ @Test void facilityStatusNoticeDeduplicatesByDecisionAndRejectsUntrustedProducer(){
+  var user=activate(uniqueEmail("facility-status"));UUID decision=UUID.randomUUID();var mapper=new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();var event=mapper.valueToTree(com.sporthub.common.event.DomainEvent.create("facility.status.changed",1,"facility-service",UUID.randomUUID(),Map.of("decisionId",decision,"ownerId",user.getId(),"facilityName","Synthetic Facility","state","SUSPENDED","reason","Verified safety violation decision")));
+  facilityNotices.apply(event);facilityNotices.apply(event);((com.fasterxml.jackson.databind.node.ObjectNode)event).put("eventId",UUID.randomUUID().toString());facilityNotices.apply(event);assertThat(jdbc.queryForObject("SELECT count(*) FROM identity_notifications WHERE source_key=?",Integer.class,"facility-status:"+decision)).isEqualTo(1);
+  ((com.fasterxml.jackson.databind.node.ObjectNode)event).put("producer","untrusted");assertThatThrownBy(()->facilityNotices.apply(event)).isInstanceOf(org.springframework.amqp.AmqpRejectAndDontRequeueException.class);
+ }
 
 }

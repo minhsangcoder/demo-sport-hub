@@ -57,4 +57,17 @@ class JwtGatewayAuthenticationResolverTest {
                 org.springframework.web.reactive.function.client.WebClient.create())
                 .validateToken(token).block()).isInstanceOf(RuntimeException.class);
     }
+
+    @Test void resolverUsesLiveRolesAndRejectsRevokedAndLockedSessions() {
+        UUID user=UUID.randomUUID();String token=Jwts.builder().subject(user.toString()).claim("roles",List.of("ADMIN"))
+            .expiration(Date.from(Instant.now().plusSeconds(60))).signWith(Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8))).compact();
+        var request=MockServerWebExchange.from(MockServerHttpRequest.get("/api/v1/admin/accounts").header("Authorization","Bearer "+token).build());
+        var live=org.springframework.web.reactive.function.client.WebClient.builder().exchangeFunction(r->reactor.core.publisher.Mono.just(org.springframework.web.reactive.function.client.ClientResponse.create(org.springframework.http.HttpStatus.OK)
+            .header("Content-Type","application/json").body("{\"data\":{\"id\":\""+user+"\",\"status\":\"ACTIVE\",\"roles\":[\"CUSTOMER\"]}}").build())).build();
+        assertThat(new JwtGatewayAuthenticationResolver(new GatewayJwtProperties(SECRET),live).resolve(request).block().roles()).containsExactly("CUSTOMER");
+        for(var status:List.of(org.springframework.http.HttpStatus.UNAUTHORIZED,org.springframework.http.HttpStatus.FORBIDDEN)) {
+            var rejected=org.springframework.web.reactive.function.client.WebClient.builder().exchangeFunction(r->reactor.core.publisher.Mono.just(org.springframework.web.reactive.function.client.ClientResponse.create(status).build())).build();
+            assertThatThrownBy(()->new JwtGatewayAuthenticationResolver(new GatewayJwtProperties(SECRET),rejected).resolve(request).block()).isInstanceOf(RuntimeException.class);
+        }
+    }
 }

@@ -61,6 +61,7 @@ public class JwtGatewayAuthenticationResolver implements GatewayAuthenticationRe
         return Mono.fromCallable(() -> {
             Claims claims = Jwts.parser().verifyWith(key).build()
                     .parseSignedClaims(token).getPayload();
+            if (claims.getExpiration() == null) throw new IllegalArgumentException("Access token requires expiration");
             Object rawRoles = claims.get("roles");
             List<String> roles = rawRoles instanceof List<?> list
                     ? list.stream().map(String::valueOf).toList()

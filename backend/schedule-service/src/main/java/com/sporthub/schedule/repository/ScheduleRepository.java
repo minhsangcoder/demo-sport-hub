@@ -29,7 +29,7 @@ public class ScheduleRepository {
             new PriceRule(uuid(r,"id"),facility,uuid(r,"court_id"),uuid(r,"sport_category_id"),r.getObject("day_of_week")==null?null:r.getInt("day_of_week"),
                 r.getObject("specific_date",LocalDate.class),r.getObject("start_time",LocalTime.class),r.getObject("end_time",LocalTime.class),
                 r.getBigDecimal("price_per_slot"),r.getInt("priority"),r.getString("label"),r.getObject("effective_from",LocalDate.class),
-                r.getObject("effective_to",LocalDate.class),r.getString("currency"),r.getBoolean("is_active"),r.getLong("version")),facility);
+                r.getObject("effective_to",LocalDate.class),r.getString("currency"),r.getBoolean("is_active"),r.getLong("version"),uuid(r,"court_type_id"),r.getString("court_type")),facility);
     }
     private static UUID uuid(ResultSet r,String name) throws SQLException {return r.getObject(name,UUID.class);}
 }

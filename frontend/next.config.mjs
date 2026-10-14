@@ -2,9 +2,8 @@
 const nextConfig = {
   output: 'standalone',
   experimental: { proxyClientMaxBodySize: '31mb' },
-  async rewrites() {
-    return [{ source: '/api/v1/:path*', destination: `${process.env.GATEWAY_URL ?? 'http://localhost:8080'}/api/v1/:path*` }]
-  },
+  // app/api/v1/[...segments] owns forwarding and reads GATEWAY_URL at runtime.
+  // A beforeFiles rewrite bypasses that handler and freezes its URL at build time.
   images: {
     unoptimized: true,
   },

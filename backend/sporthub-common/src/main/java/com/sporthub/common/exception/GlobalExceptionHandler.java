@@ -45,7 +45,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleConflict(
             ConflictException ex, HttpServletRequest request) {
         log.warn("[{}] {} | URI: {}", ex.getErrorCode().getCode(), ex.getMessage(), request.getRequestURI());
-        return response(HttpStatus.CONFLICT, ex.getErrorCode(), ex.getMessage(), request, null, null);
+        return response(HttpStatus.CONFLICT, ex.getErrorCode(), ex.getMessage(), request, null,
+                ex instanceof ConfigurationImpactException impact ? impact.details() : null);
     }
 
     @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
@@ -127,8 +128,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneric(Exception ex, HttpServletRequest request) {
-        log.error("[{}] Unexpected error at URI: {} | Error: {}",
-                ErrorCode.INTERNAL_ERROR.getCode(), request.getRequestURI(), ex.getMessage(), ex);
+        // Upstream exceptions can embed response bodies, credentials or SQL parameters.
+        log.error("[{}] Unexpected error at URI: {} | Type: {} | Stack: {}",
+                ErrorCode.INTERNAL_ERROR.getCode(), request.getRequestURI(),
+                ex.getClass().getSimpleName(), java.util.Arrays.toString(ex.getStackTrace()));
         return response(HttpStatus.INTERNAL_SERVER_ERROR, ErrorCode.INTERNAL_ERROR,
                 "An unexpected error occurred. Please try again later.", request, null, null);
     }

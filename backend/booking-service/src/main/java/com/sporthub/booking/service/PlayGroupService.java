@@ -1,0 +1,37 @@
+package com.sporthub.booking.service;
+import com.sporthub.booking.repository.BookingRepository;
+import com.sporthub.booking.web.GroupDtos.*;
+import com.sporthub.common.exception.*;
+import com.sporthub.common.security.RemoteIdentity.Caller;
+import jakarta.validation.constraints.*;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.time.Clock;
+import java.sql.Timestamp;
+import java.util.*;
+@Service @Transactional(readOnly=true)
+public class PlayGroupService {
+ public record MessageInput(@NotBlank @Size(max=2000) String body){}
+ public record Action(@NotNull @jakarta.validation.constraints.Pattern(regexp="KEEP|DISSOLVE") String action,@NotNull @Min(0) Long expectedVersion){}
+ public record Reuse(Group bookingGroup,List<Map<String,Object>> suggestedMembers,String participationPolicy){}
+ private final BookingRepository repo;private final PlayGroupMembership membership;private final GroupService groups;private final Clock clock;private final jakarta.validation.Validator validator;
+ public PlayGroupService(BookingRepository repo,PlayGroupMembership membership,GroupService groups,Clock clock,jakarta.validation.Validator validator){this.repo=repo;this.membership=membership;this.groups=groups;this.clock=clock;this.validator=validator;}
+ public Map<String,Object> byBooking(UUID booking,Caller actor){return detail(membership.root(booking),actor);}
+ public Map<String,Object> detail(UUID root,Caller actor){active(root,actor);var result=new LinkedHashMap<String,Object>(find(root));result.put("members",repo.jdbc().queryForList("SELECT user_id,display_name,joined_at FROM play_group_members WHERE play_group_id=? AND active ORDER BY joined_at,user_id",root));result.put("bookingGroupIds",repo.jdbc().queryForList("SELECT booking_group_id FROM play_group_bookings WHERE play_group_id=? ORDER BY booking_group_id",UUID.class,root));result.put("financialPolicy","Social membership/dissolution never changes paid booking membership, contribution or refund");return result;}
+ public List<Map<String,Object>> messages(UUID root,Long before,int size,Caller actor){active(root,actor);find(root);if(size<1||size>100||before!=null&&before<1)throw new IllegalArgumentException("Invalid message page");return repo.jdbc().queryForList("SELECT m.id,m.author_id,m.author_name AS display_name,m.body,m.created_at FROM play_group_messages m JOIN play_group_members p ON p.play_group_id=m.play_group_id AND p.user_id=m.author_id WHERE m.play_group_id=? AND (?::bigint IS NULL OR m.id<?::bigint) ORDER BY m.id DESC LIMIT ?",root,before,before,size);}
+ @Transactional public Map<String,Object> send(UUID root,MessageInput input,String key,Caller actor){
+  if(input==null||!validator.validate(input).isEmpty()||key==null||!key.matches("[A-Za-z0-9_.:-]{1,100}"))throw new IllegalArgumentException("Message and Idempotency-Key are required");repo.lock(actor.id());var group=membership.lock(root);active(root,actor);
+  var old=repo.jdbc().queryForList("SELECT * FROM play_group_messages WHERE author_id=? AND idempotency_key=?",actor.id(),key);if(!old.isEmpty()){var row=old.getFirst();if(!row.get("play_group_id").equals(root)||!row.get("body").equals(input.body().trim()))throw new ConflictException("Message key reused with different input");return row;}
+  if(group.get("state").equals("DISSOLVED"))throw new ConflictException("Dissolved groups are read-only");
+  Long id=repo.jdbc().queryForObject("INSERT INTO play_group_messages(play_group_id,author_id,author_name,body,idempotency_key,created_at) VALUES(?,?,?,?,?,?) RETURNING id",Long.class,root,actor.id(),actor.fullName(),input.body().trim(),key,Timestamp.from(clock.instant()));return repo.jdbc().queryForMap("SELECT * FROM play_group_messages WHERE id=?",id);
+ }
+ @Transactional public Map<String,Object> action(UUID root,Action input,Caller actor){if(input==null||!validator.validate(input).isEmpty())throw new IllegalArgumentException("Action/version are required");var group=membership.lock(root);active(root,actor);if(!group.get("owner_id").equals(actor.id()))throw new ForbiddenException("Only Booking Owner may keep or dissolve a play group");if(((Number)group.get("version")).longValue()!=input.expectedVersion())throw new ConflictException("Play group changed; reload before saving");if(group.get("state").equals("DISSOLVED"))throw new ConflictException("Play group is already dissolved");
+  if(input.action().equals("KEEP")){if(!repo.find((UUID)group.get("origin_group_id")).status().equals("COMPLETED"))throw new ConflictException("Keep is available after the original match completes");if(group.get("state").equals("KEPT"))return detail(root,actor);repo.jdbc().update("UPDATE play_groups SET state='KEPT',kept_at=?,version=version+1 WHERE id=?",Timestamp.from(clock.instant()),root);}
+  else {if(!Set.of("COMPLETED","CANCELLED","EXPIRED").contains(repo.find((UUID)group.get("origin_group_id")).status()))throw new ConflictException("Finish or cancel the original booking before dissolving its play group");repo.jdbc().update("UPDATE play_groups SET state='DISSOLVED',dissolved_at=?,version=version+1 WHERE id=?",Timestamp.from(clock.instant()),root);}
+  membership.audit(root,actor.id(),input.action().equals("KEEP")?"PLAY_GROUP_KEPT":"PLAY_GROUP_DISSOLVED",Map.of("financialEffect","NONE"));return detail(root,actor);
+ }
+ @Transactional public void leave(UUID root,Caller actor){var group=membership.lock(root);active(root,actor);if(group.get("owner_id").equals(actor.id()))throw new ConflictException("Booking Owner must dissolve the group instead of leaving");if(!repo.find((UUID)group.get("origin_group_id")).status().equals("COMPLETED"))throw new ConflictException("Leave the play group after the original match completes; pending booking uses its membership API");repo.jdbc().update("UPDATE play_group_members SET active=false,left_at=? WHERE play_group_id=? AND user_id=?",Timestamp.from(clock.instant()),root,actor.id());repo.jdbc().update("UPDATE play_groups SET version=version+1 WHERE id=?",root);membership.audit(root,actor.id(),"PLAY_MEMBER_LEFT",Map.of("financialEffect","NONE"));}
+ @Transactional public Reuse reuse(UUID root,CreateGroup input,String key,Caller actor,String auth){active(root,actor);var source=find(root);if(!source.get("owner_id").equals(actor.id()))throw new ForbiddenException("Only Booking Owner may reuse a play group");if(!source.get("state").equals("KEPT"))throw new ConflictException("Keep the completed play group before reuse");if(input==null||!validator.validate(input).isEmpty())throw new IllegalArgumentException("Choose a valid new hold and group size");var booking=groups.createForReuse(input,key,actor,auth,root);return new Reuse(booking,repo.jdbc().queryForList("SELECT user_id,display_name FROM play_group_members WHERE play_group_id=? AND active AND user_id<>? ORDER BY joined_at,user_id",root,actor.id()),"INVITE_AND_CONFIRM_EACH_BOOKING: no automatic new members, allocations, payments or notifications");}
+ private Map<String,Object> find(UUID root){var rows=repo.jdbc().queryForList("SELECT * FROM play_groups WHERE id=?",root);if(rows.isEmpty())throw new ResourceNotFoundException("Play group not found");return rows.getFirst();}
+ private void active(UUID root,Caller actor){if(!Boolean.TRUE.equals(repo.jdbc().queryForObject("SELECT EXISTS(SELECT 1 FROM play_group_members WHERE play_group_id=? AND user_id=? AND active)",Boolean.class,root,actor.id())))throw new ForbiddenException("Current play-group membership is required");}
+}

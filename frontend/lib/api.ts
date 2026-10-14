@@ -9,7 +9,7 @@ export type RegisterResult = { userId: string; accountStatus: string; verificati
 type Envelope<T> = { data: T; message: string }
 export class ApiError extends Error {
   constructor(public status: number, message: string, public code?: string,
-    public fieldErrors: { field: string; message: string }[] = []) { super(message) }
+    public fieldErrors: { field: string; message: string }[] = [], public details?: Record<string, unknown>) { super(message) }
 }
 // Temporary typed adapter for the checked-in OpenAPI contracts. Tokens stay in memory.
 let accessToken: string | null = null
@@ -21,7 +21,8 @@ function accept(session: Session | null) {
 export async function api<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
   const headers = new Headers(options.headers)
   if (options.body && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json')
-  const publicRequest=(path.startsWith('/auth/')&&path!=='/auth/logout')||/^\/facilities(?:[/?]|$)/.test(path)||path==='/sport-categories'||path.startsWith('/schedules/public/')||path.startsWith('/bookings/availability?')||path.startsWith('/bookings/search?')
+  const privateFavorite=/^\/facilities\/(?:favorites(?:[/?]|$)|[^/?]+\/(?:favorite|operations\/access)(?:[/?]|$))/.test(path)
+  const publicRequest=(path.startsWith('/auth/')&&path!=='/auth/logout')||(!privateFavorite&&/^\/facilities(?:[/?]|$)/.test(path))||path==='/sport-categories'||path.startsWith('/schedules/public/')||path.startsWith('/bookings/availability?')||path.startsWith('/bookings/search?')
   if (accessToken&&!publicRequest) headers.set('Authorization', `Bearer ${accessToken}`)
   let response: Response
   try { response = await fetch(`/api/v1${path}`, { ...options, headers, credentials: 'include', cache: 'no-store' }) }
@@ -32,7 +33,11 @@ export async function api<T>(path: string, options: RequestInit = {}, retry = tr
   }
   if (response.status === 204) return undefined as T
   const body = await response.json().catch(() => ({}))
-  if (!response.ok) throw new ApiError(response.status, body.message ?? 'Không thể thực hiện yêu cầu.', body.code, body.fieldErrors)
+  if (!response.ok) throw new ApiError(response.status, body.message ?? 'Không thể thực hiện yêu cầu.', body.code, body.fieldErrors, body.details)
+  if (!body || !Object.prototype.hasOwnProperty.call(body, "data")) {
+    if (response.status === 202) return undefined as T
+    throw new ApiError(502, "Dịch vụ trả dữ liệu không hợp lệ. Vui lòng thử lại.")
+  }
   return (body as Envelope<T>).data
 }
 export function refreshSession(): Promise<Session> {

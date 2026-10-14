@@ -61,7 +61,7 @@ spring:
         - id: identity-service
           uri: ${IDENTITY_SERVICE_URL:http://localhost:8081}
           predicates:
-            - Path=/api/v1/auth/**, /api/v1/users/**, /api/v1/owner-applications/**, /api/v1/staff-bindings/**, /api/v1/admin/accounts/**, /api/v1/admin/owner-applications/**
+            - Path=/api/v1/auth/**, /api/v1/users/**, /api/v1/owner-applications/**, /api/v1/staff-bindings/**, /api/v1/staff-profiles/**, /api/v1/admin/accounts/**, /api/v1/admin/owner-applications/**
           filters:
             - StripPrefix=0
 
@@ -117,10 +117,10 @@ management:
   endpoints:
     web:
       exposure:
-        include: health, info, gateway
+        include: health
   endpoint:
     gateway:
-      enabled: true
+      enabled: false
 
 # ── Logging ───────────────────────────────────────────────────
 logging:

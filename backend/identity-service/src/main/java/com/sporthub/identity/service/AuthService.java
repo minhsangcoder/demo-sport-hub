@@ -24,6 +24,14 @@ public class AuthService {
     private final ChallengeService challengeService;
     private final RefreshSessionService refreshSessionService;
     private final AuditService auditService;
+    private final LoginAttemptLimiter loginAttempts;
+    private final UserSecurityLock securityLock;
+    private String dummyPasswordHash;
+
+    @jakarta.annotation.PostConstruct
+    void initializeDummyPassword() {
+        dummyPasswordHash = passwordEncoder.encode("synthetic-credential-timing-equalizer");
+    }
 
     @Transactional
     public RegisterResult register(RegisterRequest request, RequestMetadata metadata) {
@@ -59,10 +67,13 @@ public class AuthService {
     @Transactional(noRollbackFor = IdentityException.class)
     public VerificationResult verify(VerificationRequest request, RequestMetadata metadata) {
         OtpCode challenge = challengeService.consume(request, null);
-        User user = challenge.getUser();
+        User user = securityLock.current(challenge.getUser());
         if ((challenge.getPurpose() == OtpPurpose.EMAIL_VERIFY || challenge.getPurpose() == OtpPurpose.PHONE_VERIFY)
                 && user.getStatus() != AccountStatus.PENDING_VERIFICATION)
             throw new IdentityException(HttpStatus.FORBIDDEN, "IDENTITY-ACCOUNT-INACTIVE", "Account cannot be activated");
+        if ((challenge.getPurpose() == OtpPurpose.EMAIL_CHANGE || challenge.getPurpose() == OtpPurpose.PHONE_CHANGE)
+                && user.getStatus() != AccountStatus.ACTIVE)
+            throw new IdentityException(HttpStatus.FORBIDDEN, "IDENTITY-ACCOUNT-INACTIVE", "Account is not active");
         switch (challenge.getPurpose()) {
             case EMAIL_VERIFY -> {
                 user.setEmailVerified(true);
@@ -78,6 +89,7 @@ public class AuthService {
                 if (user.getPendingEmail() == null || !user.getPendingEmail().equals(challenge.getRecipient())) {
                     throw new IdentityException(HttpStatus.UNPROCESSABLE_ENTITY, "IDENTITY-CHANGE-NOT-PENDING", "Email change is no longer pending");
                 }
+                challengeService.invalidatePasswordResets(user, user.getEmail());
                 user.setEmail(user.getPendingEmail());
                 user.setPendingEmail(null);
                 user.setEmailVerified(true);
@@ -86,6 +98,7 @@ public class AuthService {
                 if (user.getPendingPhone() == null || !user.getPendingPhone().equals(challenge.getRecipient())) {
                     throw new IdentityException(HttpStatus.UNPROCESSABLE_ENTITY, "IDENTITY-CHANGE-NOT-PENDING", "Phone change is no longer pending");
                 }
+                challengeService.invalidatePasswordResets(user, user.getPhone());
                 user.setPhone(user.getPendingPhone());
                 user.setPendingPhone(null);
                 user.setPhoneVerified(true);
@@ -101,16 +114,20 @@ public class AuthService {
     public SessionTokens login(LoginRequest request, RequestMetadata metadata) {
         String identifier = request.identifier().trim();
         boolean emailLogin = identifier.contains("@");
-        User user = emailLogin
-                ? userRepository.findByEmailIgnoreCase(identifier).orElseThrow(this::invalidCredentials)
-                : userRepository.findByPhone(identifier).orElseThrow(this::invalidCredentials);
-        if (user.getPasswordHash() == null || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+        loginAttempts.reserve(identifier);
+        User user = (emailLogin ? userRepository.findByEmailIgnoreCase(identifier)
+                : userRepository.findByPhone(identifier)).orElse(null);
+        if(user != null) user = securityLock.current(user);
+        boolean matches = passwordEncoder.matches(request.password(),
+                user == null || user.getPasswordHash() == null ? dummyPasswordHash : user.getPasswordHash());
+        if (user == null || user.getPasswordHash() == null || !matches) {
             throw invalidCredentials();
         }
         boolean identifierVerified = emailLogin ? user.isEmailVerified() : user.isPhoneVerified();
         if (user.getStatus() != AccountStatus.ACTIVE || !identifierVerified || user.getRoles().isEmpty()) {
             throw new IdentityException(HttpStatus.FORBIDDEN, "IDENTITY-ACCOUNT-INACTIVE", "Account is not active");
         }
+        loginAttempts.succeeded(identifier);
         user.setLastLoginAt(Instant.now());
         SessionTokens tokens = refreshSessionService.issue(user, metadata);
         auditService.record(user.getId(), "LOGIN", "USER", user.getId(), metadata);
@@ -127,6 +144,7 @@ public class AuthService {
 
         String email = normalizeEmail(identity.email());
         User user = userRepository.findByGoogleSub(identity.googleSub()).orElse(null);
+        if(user != null) user = securityLock.current(user);
         if (user == null) {
             user = userRepository.findByEmailIgnoreCase(email).orElse(null);
             if (user == null) {
@@ -148,6 +166,7 @@ public class AuthService {
                         .build());
                 user.setProfile(profile);
             } else {
+                user = securityLock.current(user);
                 if (!user.isEmailVerified()) {
                     throw new IdentityException(HttpStatus.FORBIDDEN, "IDENTITY-GOOGLE-EMAIL-UNVERIFIED",
                             "Verify this email address before linking a Google account");
@@ -197,19 +216,22 @@ public class AuthService {
 
     @Transactional
     public void logout(String rawRefreshToken, UUID accessSessionId, UUID userId, RequestMetadata metadata) {
-        refreshSessionService.revoke(rawRefreshToken, accessSessionId);
-        if (userId != null) {
-            auditService.record(userId, "LOGOUT", "USER", userId, metadata);
-        }
+        var revokedUsers = refreshSessionService.revoke(rawRefreshToken, accessSessionId);
+        for (UUID revokedUser : revokedUsers)
+            auditService.record(revokedUser, "LOGOUT", "USER", revokedUser, metadata);
     }
 
     @Transactional
     public void forgotPassword(ForgotPasswordRequest request, RequestMetadata metadata) {
         String identifier = request.identifier().trim();
         var account = identifier.contains("@") ? userRepository.findByEmailIgnoreCase(identifier) : userRepository.findByPhone(identifier);
-        account.ifPresent(user -> {
-            if (user.getStatus() == AccountStatus.ACTIVE && (identifier.contains("@") ? user.isEmailVerified() : user.isPhoneVerified())) {
-                challengeService.issue(user, OtpPurpose.PASSWORD_RESET, identifier);
+        account.ifPresent(candidate -> {
+            User user = securityLock.current(candidate);
+            boolean email = identifier.contains("@");
+            boolean verified = email ? user.isEmailVerified() && user.getEmail() != null && user.getEmail().equalsIgnoreCase(identifier)
+                    : user.isPhoneVerified() && identifier.equals(user.getPhone());
+            if (user.getStatus() == AccountStatus.ACTIVE && verified) {
+                challengeService.issue(user, OtpPurpose.PASSWORD_RESET, email ? user.getEmail() : user.getPhone());
                 auditService.record(user.getId(), "PASSWORD_RESET_REQUESTED", "USER", user.getId(), metadata);
             }
         });
@@ -218,7 +240,7 @@ public class AuthService {
     @Transactional(noRollbackFor = IdentityException.class)
     public void resetPassword(ResetPasswordRequest request, RequestMetadata metadata) {
         OtpCode challenge = challengeService.consumeReset(request.challengeId(), request.code());
-        User user = challenge.getUser();
+        User user = securityLock.current(challenge.getUser());
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         refreshSessionService.revokeAll(user.getId());
         auditService.record(user.getId(), "PASSWORD_RESET_COMPLETED", "USER", user.getId(), metadata);

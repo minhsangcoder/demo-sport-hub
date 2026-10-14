@@ -17,50 +17,59 @@ import java.util.*;
 @Service @Transactional(readOnly=true)
 public class PaymentService {
  private final PaymentRepository repo;private final PayableClient payable;private final PaymentProvider provider;
- private final ReliableOutbox outbox;private final ObjectMapper json;
- public PaymentService(PaymentRepository repo,PayableClient payable,PaymentProvider provider,ReliableOutbox outbox,ObjectMapper json){this.repo=repo;this.payable=payable;this.provider=provider;this.outbox=outbox;this.json=json;}
+ private final ReliableOutbox outbox;private final ObjectMapper json;private final java.time.Clock clock;private final PaymentObligations obligations;private final PaymentCallbacks callbacks;
+ public PaymentService(PaymentRepository repo,PayableClient payable,PaymentProvider provider,ReliableOutbox outbox,ObjectMapper json,java.time.Clock clock,PaymentObligations obligations,PaymentCallbacks callbacks){this.repo=repo;this.payable=payable;this.provider=provider;this.outbox=outbox;this.json=json;this.clock=clock;this.obligations=obligations;this.callbacks=callbacks;}
  @Transactional public Payment create(CreatePayment input,String key,Caller caller,String token){
   checkKey(key);if(input.memberId()!=null&&input.acquisitionId()!=null)throw new IllegalArgumentException("Payment cannot be both a group contribution and a transfer");repo.lock(caller.id());
   var existing=repo.list("SELECT p.* FROM payment_orders p JOIN payment_requests r ON r.payment_id=p.id WHERE r.payer_id=? AND r.idempotency_key=?",caller.id(),key);
-  if(!existing.isEmpty()){var old=existing.get(0);if(!old.bookingId().equals(input.bookingId())||!Objects.equals(old.memberId(),input.memberId())||!Objects.equals(old.acquisitionId(),input.acquisitionId()))throw new ConflictException("Idempotency key was used for another payment");return old;}
-  var bill=input.acquisitionId()==null?payable.payable(input.bookingId(),input.memberId(),token):payable.transfer(input.acquisitionId(),token);if(!bill.path("payerId").asText().equals(caller.id().toString())||!bill.path("bookingId").asText().equals(input.bookingId().toString()))throw new ForbiddenException("Payer or booking does not match payable record");
-  repo.lock(input.bookingId());
-  repo.jdbc().update("UPDATE payment_orders SET status='EXPIRED',updated_at=NOW() WHERE booking_id=? AND status='PENDING' AND expires_at<=NOW()",input.bookingId());
-  var pending=repo.list("SELECT * FROM payment_orders WHERE booking_id=? AND payer_id=? AND member_id IS NOT DISTINCT FROM ? AND acquisition_id IS NOT DISTINCT FROM ? AND status='PENDING'",input.bookingId(),caller.id(),input.memberId(),input.acquisitionId());
-  if(!pending.isEmpty()){remember(input,key,caller,pending.get(0).id());return pending.get(0);}
-  UUID id=UUID.randomUUID();var amount=bill.path("amount").decimalValue();String currency=bill.path("currency").asText();
-  if(amount.signum()<=0)throw new ConflictException("Payable amount must be positive");
-  String reference=provider.create(id,amount,currency);
-  UUID seller=input.acquisitionId()==null?null:UUID.fromString(bill.path("sellerId").asText());
-  if(input.acquisitionId()!=null&&(!bill.path("purpose").asText().equals("TRANSFER")||!bill.path("acquisitionId").asText().equals(input.acquisitionId().toString())))throw new ConflictException("Transfer payable reference mismatch");
-  repo.jdbc().update("INSERT INTO payment_orders(id,booking_id,payer_id,member_id,acquisition_id,seller_id,purpose,amount,currency,provider,provider_reference,status,idempotency_key,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,'PENDING',?,?)",
-   id,input.bookingId(),caller.id(),input.memberId(),input.acquisitionId(),seller,bill.path("purpose").asText(),amount,currency,provider.name(),reference,key,Timestamp.from(Instant.parse(bill.path("expiresAt").asText())));
-  remember(input,key,caller,id);audit(id,caller.id(),"PAYMENT_CREATED",Map.of());return repo.find(id);
+  if(!existing.isEmpty()){var old=existing.getFirst();if(!old.bookingId().equals(input.bookingId())||!Objects.equals(old.memberId(),input.memberId())||!Objects.equals(old.acquisitionId(),input.acquisitionId()))throw new ConflictException("Idempotency key was used for another payment");return old;}
+  repo.lock(input.bookingId());String purpose=input.acquisitionId()!=null?"TRANSFER":input.memberId()!=null?"GROUP_CONTRIBUTION":"BOOKING";
+  UUID subject=PaymentObligations.subject(input.memberId(),input.acquisitionId());var claim=obligations.find(input.bookingId(),purpose,subject);Payment current=null;
+  if(claim!=null){
+   if(repo.jdbc().queryForObject("SELECT count(*) FROM payment_callback_reviews r JOIN payment_orders p ON p.id=r.payment_id WHERE p.booking_id=? AND p.purpose=? AND COALESCE(p.member_id,p.acquisition_id,'00000000-0000-0000-0000-000000000000'::uuid)=? AND r.state='REQUIRES_REVIEW' AND r.body->>'status'='SUCCESS'",Integer.class,input.bookingId(),purpose,subject)>0)throw new ConflictException("Payment obligation requires reconciliation before another attempt");
+   UUID settled=(UUID)claim.get("settled_payment_id");UUID active=(UUID)claim.get("current_payment_id");
+   if(settled!=null){var paid=repo.find(settled);if(!paid.payerId().equals(caller.id()))throw new ConflictException("Payment obligation is already settled");remember(input,key,caller,paid.id());return paid;}
+   // A legacy callback may have committed SUCCESS without updating the new claim.
+   var paidRows=repo.list("SELECT * FROM payment_orders WHERE booking_id=? AND purpose=? AND COALESCE(member_id,acquisition_id,'00000000-0000-0000-0000-000000000000'::uuid)=? AND status='SUCCESS'",input.bookingId(),purpose,subject);
+   if(paidRows.size()>1)throw new ConflictException("Multiple verified receipts require reconciliation");
+   if(paidRows.size()==1){var paid=paidRows.getFirst();obligations.settle(paid);if(!paid.payerId().equals(caller.id()))throw new ConflictException("Payment obligation is already settled");remember(input,key,caller,paid.id());return paid;}
+   if(active!=null){expire(active);current=repo.find(active);if(current.status().equals("PENDING")&&!current.payerId().equals(caller.id()))throw new ConflictException("Another payment is already in progress for this obligation");}
+  }
+  var bill=input.acquisitionId()==null?payable.payable(input.bookingId(),input.memberId(),token):payable.transfer(input.acquisitionId(),token);
+  if(!bill.path("payerId").asText().equals(caller.id().toString())||!bill.path("bookingId").asText().equals(input.bookingId().toString()))throw new ForbiddenException("Payer or booking does not match payable record");
+  if(!purpose.equals(bill.path("purpose").asText())||(input.memberId()!=null&&!input.memberId().toString().equals(bill.path("memberId").asText()))||(input.acquisitionId()!=null&&!input.acquisitionId().toString().equals(bill.path("acquisitionId").asText())))throw new ConflictException("Payable scope mismatch");
+  var amount=com.sporthub.common.money.Money.positive(bill.path("amount").decimalValue(),bill.path("currency").asText());String currency=bill.path("currency").asText();
+  if(purpose.equals("GROUP_CONTRIBUTION")&&amount.stripTrailingZeros().scale()>0)throw new ConflictException("Group contributions require integral VND amounts");
+  Instant expires;try{expires=Instant.parse(bill.path("expiresAt").asText()).truncatedTo(java.time.temporal.ChronoUnit.MICROS);}catch(java.time.DateTimeException ex){throw new ConflictException("Payable deadline is invalid");}
+  if(!clock.instant().isBefore(expires))throw new ConflictException("Payment deadline has expired");
+  obligations.prepare(input.bookingId(),purpose,subject,amount,currency);
+  if(current!=null&&current.status().equals("PENDING")){if(current.amount().compareTo(amount)!=0||!current.currency().equals(currency)||!current.expiresAt().equals(expires))throw new ConflictException("Payable changed for an existing payment order");remember(input,key,caller,current.id());return current;}
+  UUID seller=input.acquisitionId()==null?null:UUID.fromString(bill.path("sellerId").asText());UUID id=UUID.randomUUID();String reference=provider.create(id,amount,currency);
+  if(reference==null||reference.isBlank()||reference.length()>120)throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_GATEWAY,"Provider did not return a valid payment reference");
+  if(!clock.instant().isBefore(expires))throw new ConflictException("Payment deadline expired during provider initialization");
+  repo.jdbc().update("INSERT INTO payment_orders(id,booking_id,payer_id,member_id,acquisition_id,seller_id,purpose,amount,currency,provider,provider_reference,status,idempotency_key,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,'PENDING',?,?)",id,input.bookingId(),caller.id(),input.memberId(),input.acquisitionId(),seller,purpose,amount,currency,provider.name(),reference,key,Timestamp.from(expires));
+  var result=repo.find(id);obligations.current(result);remember(input,key,caller,id);audit(id,caller.id(),"PAYMENT_CREATED",Map.of("provider",provider.name()));return result;
+ }
+ @Transactional public Payment expire(UUID id){
+  var old=repo.find(id);repo.lock(old.bookingId());repo.lock(id);var current=repo.find(id);
+  if(current.status().equals("PENDING")&&!current.expiresAt().isAfter(clock.instant())){repo.jdbc().update("UPDATE payment_orders SET status='EXPIRED',updated_at=NOW() WHERE id=? AND status='PENDING'",id);audit(id,null,"PAYMENT_EXPIRED",Map.of());}
+  return repo.find(id);
  }
  public Payment own(UUID id,Caller caller){var p=repo.find(id);if(!p.payerId().equals(caller.id())&&!caller.hasRole("ADMIN"))throw new ForbiddenException("Payment belongs to another payer");return p;}
  public List<Payment> mine(Caller caller){return repo.list("SELECT * FROM payment_orders WHERE payer_id=? ORDER BY created_at DESC LIMIT 200",caller.id());}
- public Payment demo(UUID id,DemoOutcome input,Caller caller){var p=own(id,caller);if(!p.payerId().equals(caller.id()))throw new ForbiddenException("Only the payer may simulate this payment");if(!p.provider().equals("DEMO"))throw new ConflictException("Provider does not support simulation");if(!p.status().equals("PENDING"))return p;if(!p.expiresAt().isAfter(Instant.now()))throw new ConflictException("Payment expired");provider.simulate(p,input.outcome());return repo.find(id);}
- @Transactional public Payment callback(Callback callback,String signature){
-  provider.verify(callback,signature);repo.lock(callback.paymentId());var order=repo.find(callback.paymentId());
-  if(!order.providerReference().equals(callback.providerReference())||order.amount().compareTo(callback.amount())!=0||!order.currency().equals(callback.currency()))throw new ForbiddenException("Callback reference or amount mismatch");
-  // Timestamp freshness is checked independently; retries with a new timestamp have the same business fingerprint.
-  String fingerprint=Signatures.sha256(callback.paymentId()+"|"+callback.transactionId()+"|"+callback.amount().setScale(2)+"|"+callback.currency()+"|"+callback.status());
-  var previous=repo.jdbc().queryForList("SELECT fingerprint,payment_id FROM provider_callbacks WHERE provider=? AND transaction_id=?",provider.name(),callback.transactionId());
-  if(!previous.isEmpty()){if(!previous.get(0).get("fingerprint").equals(fingerprint))throw new ConflictException("Provider transaction was reused with conflicting data");return order;}
-  if(!order.status().equals("PENDING")&&!order.status().equals("EXPIRED"))throw new ConflictException("Payment is already final");
-  repo.jdbc().update("INSERT INTO provider_callbacks(provider,transaction_id,payment_id,fingerprint,body) VALUES(?,?,?,?,?::jsonb)",provider.name(),callback.transactionId(),order.id(),fingerprint,write(callback));
-  Instant paid=Instant.ofEpochSecond(callback.timestamp());
-  repo.jdbc().update("UPDATE payment_orders SET status=?,paid_at=?,updated_at=NOW() WHERE id=?",callback.status(),callback.status().equals("SUCCESS")?Timestamp.from(paid):null,order.id());
-  audit(order.id(),null,"CALLBACK_VERIFIED",Map.of("transactionId",callback.transactionId(),"status",callback.status()));
-  if(order.purpose().equals("TRANSFER")&&callback.status().equals("SUCCESS"))repo.jdbc().update("INSERT INTO transfer_escrow(payment_id,acquisition_id,payer_id,seller_id,amount,currency,state) VALUES(?,?,?,?,?,?,'HELD_POLICY_BLOCKED') ON CONFLICT(payment_id) DO NOTHING",order.id(),order.acquisitionId(),order.payerId(),order.sellerId(),order.amount(),order.currency());
-  var payload=new HashMap<String,Object>();payload.put("paymentId",order.id());payload.put("bookingId",order.bookingId());payload.put("payerId",order.payerId());payload.put("memberId",order.memberId());payload.put("acquisitionId",order.acquisitionId());payload.put("purpose",order.purpose());payload.put("amount",order.amount());payload.put("currency",order.currency());payload.put("status",callback.status());payload.put("paidAt",paid);payload.put("transactionId",callback.transactionId());
-  outbox.record(RabbitMQConfig.EXCHANGE_PAYMENT,DomainEvent.create("payment.completed",1,"payment-service",order.id(),payload));return repo.find(order.id());
+ public Payment demo(UUID id,DemoOutcome input,Caller caller){var p=own(id,caller);if(!p.payerId().equals(caller.id()))throw new ForbiddenException("Only the payer may simulate this payment");if(!p.provider().equals("DEMO")||!provider.name().equals("DEMO"))throw new ConflictException("Provider does not support simulation");if(!p.status().equals("PENDING"))return p;if(!Set.of("SUCCESS","FAILED").contains(input.outcome()))throw new IllegalArgumentException("Unknown DEMO outcome");if(!p.expiresAt().isAfter(clock.instant()))throw new ConflictException("Payment expired");provider.simulate(p,input.outcome());return repo.find(id);}
+ @Transactional(propagation=org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+ public Payment callback(Callback callback,String signature){
+  var result=callbacks.process(callback,signature);
+  // The processor commits verified conflicting evidence before returning an error response.
+  if(result.conflict()!=null){if(result.forbidden())throw new ForbiddenException(result.conflict());throw new ConflictException(result.conflict());}
+  return result.payment();
  }
  @Transactional public Refund requestRefund(UUID id,RefundInput input,String key,Caller caller){
-  checkKey(key);repo.lock(caller.id());var p=own(id,caller);repo.lock(id);if(!p.status().equals("SUCCESS"))throw new ConflictException("Only successful payments can have refund requests");
+  checkKey(key);if(input==null||input.reason()==null||input.reason().isBlank()||input.reason().length()>500)throw new IllegalArgumentException("Supply a refund review reason of up to 500 characters");repo.lock(caller.id());var p=own(id,caller);repo.lock(id);if(!p.status().equals("SUCCESS"))throw new ConflictException("Only successful payments can have refund requests");
   var previous=repo.jdbc().queryForList("SELECT id,payment_id,reason FROM refunds WHERE requester_id=? AND idempotency_key=?",caller.id(),key);
-  if(!previous.isEmpty()){var r=previous.get(0);if(!r.get("payment_id").equals(id)||!r.get("reason").equals(input.reason()))throw new ConflictException("Refund key reused with different input");return new Refund((UUID)r.get("id"),id,caller.id(),input.reason(),"BLOCKED_RULE",null,null);}
-  UUID refund=UUID.randomUUID();repo.jdbc().update("INSERT INTO refunds(id,payment_id,requester_id,reason,state,idempotency_key) VALUES(?,?,?,?,'BLOCKED_RULE',?)",refund,id,caller.id(),input.reason(),key);audit(id,caller.id(),"REFUND_REQUESTED",Map.of("refundId",refund,"policy","BLOCKED_RULE"));return new Refund(refund,id,caller.id(),input.reason(),"BLOCKED_RULE",null,null);
+  if(!previous.isEmpty()){var r=previous.get(0);if(!r.get("payment_id").equals(id)||!r.get("reason").equals(input.reason()))throw new ConflictException("Refund key reused with different input");return new Refund((UUID)r.get("id"),id,caller.id(),input.reason(),"BLOCKED_RULE",null,null,p.payerId());}
+  UUID refund=UUID.randomUUID();repo.jdbc().update("INSERT INTO refunds(id,payment_id,requester_id,reason,state,idempotency_key,beneficiary_id) VALUES(?,?,?,?,'BLOCKED_RULE',?,?)",refund,id,caller.id(),input.reason(),key,p.payerId());audit(id,caller.id(),"REFUND_REQUESTED",Map.of("refundId",refund,"policy","BLOCKED_RULE","beneficiaryId",p.payerId()));return new Refund(refund,id,caller.id(),input.reason(),"BLOCKED_RULE",null,null,p.payerId());
  }
  private String write(Object value){try{return json.writeValueAsString(value);}catch(Exception ex){throw new IllegalStateException(ex);}}
  private void remember(CreatePayment input,String key,Caller caller,UUID payment){repo.jdbc().update("INSERT INTO payment_requests(payer_id,idempotency_key,booking_id,member_id,acquisition_id,payment_id) VALUES(?,?,?,?,?,?)",caller.id(),key,input.bookingId(),input.memberId(),input.acquisitionId(),payment);}

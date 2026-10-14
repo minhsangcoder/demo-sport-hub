@@ -151,6 +151,7 @@ services:
     environment:
       <<: *backend-env
       FACILITY_DB_URL: jdbc:postgresql://postgres:5432/facility_db
+      SPORTHUB_EVENTS_OUTBOX_ENABLED: 'true'
       MINIO_ENDPOINT: http://minio:9000
       MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-http://localhost:9000}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
@@ -211,6 +212,7 @@ services:
     environment:
       <<: *backend-env
       BOOKING_DB_URL: jdbc:postgresql://postgres:5432/booking_db
+      SPORTHUB_EVENTS_OUTBOX_ENABLED: 'true'
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:3000}
       GROUP_PAYMENT_DEADLINE_SECONDS: ${GROUP_PAYMENT_DEADLINE_SECONDS:-1800}
       GROUP_MIN_LEAD_SECONDS: ${GROUP_MIN_LEAD_SECONDS:-7200}
@@ -245,6 +247,7 @@ services:
     environment:
       <<: *backend-env
       PAYMENT_DB_URL: jdbc:postgresql://postgres:5432/payment_db
+      SPORTHUB_EVENTS_OUTBOX_ENABLED: 'true'
       DEMO_PAYMENT_CALLBACK_SECRET: ${DEMO_PAYMENT_CALLBACK_SECRET:?Set a separate demo callback secret}
       DEMO_PAYMENT_CALLBACK_URL: http://payment-service:8085/api/v1/payments/providers/demo/callback
     depends_on:
@@ -273,6 +276,7 @@ services:
     environment:
       <<: *backend-env
       TRANSFER_DB_URL: jdbc:postgresql://postgres:5432/transfer_db
+      SPORTHUB_EVENTS_OUTBOX_ENABLED: 'true'
       TRANSFER_ACQUISITION_SECONDS: ${TRANSFER_ACQUISITION_SECONDS:-600}
     depends_on:
       postgres:
@@ -330,6 +334,8 @@ services:
 
   frontend:
     profiles: [apps]
+    environment:
+      GATEWAY_URL: http://api-gateway:8080
     build:
       context: ./frontend
       args:

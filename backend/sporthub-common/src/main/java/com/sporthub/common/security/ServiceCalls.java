@@ -12,7 +12,8 @@ public final class ServiceCalls {
     public static void verify(String secret,String method,String path,String timestamp,String body,String signature) {
         try {
             long time=Long.parseLong(timestamp);
-            if(secret.length()<32||Math.abs(Instant.now().getEpochSecond()-time)>300||
+            long now=Instant.now().getEpochSecond();
+            if(secret.length()<32||time<now-300||time>now+300||
                 !Signatures.matches(sign(secret,method,path,time,body),signature))throw new IllegalArgumentException();
         } catch(Exception ex) {throw new ForbiddenException("Invalid private service signature");}
     }
