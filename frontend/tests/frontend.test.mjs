@@ -13,6 +13,10 @@ function load(file, extra = {}) {
     exports,
     module: { exports },
     console,
+    require(id) {
+      if (id === "./error-translator") return load("lib/error-translator.ts");
+      throw new Error(`Unexpected require: ${id}`);
+    },
     URL,
     URLSearchParams,
     Headers,

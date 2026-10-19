@@ -20,4 +20,11 @@ psql -v ON_ERROR_STOP=1 -v db_owner="$POSTGRES_USER" \
     GRANT ALL PRIVILEGES ON DATABASE transfer_db TO :"db_owner";
 EOSQL
 
+for db in identity_db facility_db schedule_db booking_db payment_db transfer_db; do
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$db" <<-EOSQL
+        CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+        CREATE EXTENSION IF NOT EXISTS btree_gist;
+EOSQL
+done
+
 echo "SportHub: identity_db, facility_db, schedule_db, booking_db, payment_db and transfer_db created"

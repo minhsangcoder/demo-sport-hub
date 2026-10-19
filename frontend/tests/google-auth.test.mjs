@@ -5,11 +5,12 @@ import vm from 'node:vm'
 import ts from 'typescript'
 
 const nextKey = 'sporthub-google-next'
-const fallbackPath = '/customer/profile'
+const fallbackPath = '/'
 const sourceFiles = {
   state: new URL('../features/auth/google-auth-state.ts', import.meta.url),
   callback: new URL('../features/auth/google-auth-callback.tsx', import.meta.url),
   api: new URL('../lib/api.ts', import.meta.url),
+  errorTranslator: new URL('../lib/error-translator.ts', import.meta.url),
 }
 const compiled = Object.fromEntries(Object.entries(sourceFiles).map(([name, path]) => [
   name,
@@ -33,7 +34,11 @@ function loadModule(name, globals, overrides = {}, cache = new Map()) {
   if (cache.has(name)) return cache.get(name)
   const exports = {}
   cache.set(name, exports)
-  const dependencies = { './google-auth-state': 'state', '@/lib/api': 'api' }
+  const dependencies = {
+    './google-auth-state': 'state',
+    '@/lib/api': 'api',
+    './error-translator': 'errorTranslator',
+  }
   vm.runInNewContext(compiled[name], {
     exports,
     URL,

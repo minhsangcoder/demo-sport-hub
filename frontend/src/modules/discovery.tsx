@@ -96,7 +96,7 @@ export function VenueCard({ item }: { item: DiscoveryItem }) {
           <div>
             <small>Từ </small>
             <strong>{money(item.fromPrice, item.currency)}</strong>
-            <small> / slot</small>
+            <small> /h</small>
           </div>
           <ArrowUpRight size={20} />
         </div>
@@ -428,14 +428,14 @@ export function SearchPage() {
             <div className="grid-2" style={{ gap: 10 }}>
               <Field
                 name="minPrice"
-                label="Giá từ (đ/slot)"
+                label="Giá từ (đ/h)"
                 type="number"
                 min={0}
                 defaultValue={params.get("minPrice") ?? ""}
               />
               <Field
                 name="maxPrice"
-                label="Đến (đ/slot)"
+                label="Đến (đ/h)"
                 type="number"
                 min={0}
                 defaultValue={params.get("maxPrice") ?? ""}

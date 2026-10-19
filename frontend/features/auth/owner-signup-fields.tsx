@@ -6,6 +6,7 @@ import type { FacilityLocation } from '@/features/facility/location-picker'
 import type { Category } from '@/features/facility/types'
 import { useApi } from '@/lib/use-api'
 import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
 export function OwnerSignupFields({location,onLocationChange,busy,fields}:{location:FacilityLocation;onLocationChange:(value:FacilityLocation)=>void;busy:boolean;fields:Record<string,string>}){
  const categories=useApi<Category[]>('/sport-categories')
  return <div className="grid min-w-0 gap-7">
@@ -18,7 +19,7 @@ export function OwnerSignupFields({location,onLocationChange,busy,fields}:{locat
  <label className="grid min-w-0 gap-2 text-sm font-medium">Giá mỗi slot (VND)<Input type="number" name="pricePerSlot" required min="0.01" step="0.01" max="9999999999.99" disabled={busy}/></label>
  <label className="grid min-w-0 gap-2 text-sm font-medium">Giờ mở cửa<Input name="opensAt" type="time" defaultValue="06:00" required disabled={busy}/></label><label className="grid min-w-0 gap-2 text-sm font-medium">Giờ đóng cửa<Input name="closesAt" type="time" defaultValue="22:00" required disabled={busy}/></label>
  <label className="grid min-w-0 gap-2 text-sm font-medium">Độ dài slot (phút)<Input name="slotMinutes" type="number" min={5} max={720} defaultValue={60} required disabled={busy}/></label>
- <fieldset className="flex min-w-0 flex-wrap gap-4 md:col-span-2"><legend className="mb-3 text-sm font-medium">Các ngày mở cửa</legend>{['Thứ 2','Thứ 3','Thứ 4','Thứ 5','Thứ 6','Thứ 7','Chủ nhật'].map((day,i)=><label key={day} className="flex items-center gap-2 text-sm"><input type="checkbox" name="days" value={i+1} defaultChecked disabled={busy}/>{day}</label>)}</fieldset></section>
+ <fieldset className="flex min-w-0 flex-wrap gap-4 md:col-span-2"><legend className="mb-3 text-sm font-medium">Các ngày mở cửa</legend>{['Thứ 2','Thứ 3','Thứ 4','Thứ 5','Thứ 6','Thứ 7','Chủ nhật'].map((day,i)=><label key={day} className="flex items-center gap-2 text-sm cursor-pointer select-none group"><Checkbox name="days" value={String(i+1)} defaultChecked disabled={busy} size="sm"/><span className="text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white transition-colors">{day}</span></label>)}</fieldset></section>
  <section className="grid min-w-0 gap-5 border-t pt-6"><h2 className="text-xl font-bold">Tài liệu xác minh và ảnh</h2><DocumentFileField label="Giấy tờ định danh" error={fields.identityDocument} name="identityDocument" disabled={busy}/><DocumentFileField label="Giấy tờ địa điểm / sử dụng mặt bằng" error={fields.locationDocument} name="locationDocument" disabled={busy}/><DocumentFileField label="Ảnh giới thiệu cơ sở" error={fields.facilityImage} name="facilityImage" image disabled={busy}/></section>
  </div>
 }

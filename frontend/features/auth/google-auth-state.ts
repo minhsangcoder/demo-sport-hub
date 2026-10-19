@@ -1,5 +1,5 @@
 const nextKey = 'sporthub-google-next'
-const fallbackPath = '/customer/profile'
+const fallbackPath = '/'
 
 export function postLoginPath(value: string | null): string {
   if (!value?.startsWith('/')) return fallbackPath

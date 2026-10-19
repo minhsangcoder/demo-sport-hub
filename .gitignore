@@ -15,6 +15,7 @@
 # Technical documents, reports and AI instructions stay local, even inside source trees.
 **/docs/
 **/*.md
+!/README.md
 **/*.mdx
 **/*.doc
 **/*.docx

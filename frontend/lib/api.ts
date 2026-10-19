@@ -1,3 +1,5 @@
+import { translateError } from './error-translator'
+
 export type Role = 'CUSTOMER' | 'OWNER' | 'STAFF' | 'ADMIN'
 export type UserProfile = {
   id: string; fullName: string; email: string | null; phone: string | null;
@@ -33,7 +35,17 @@ export async function api<T>(path: string, options: RequestInit = {}, retry = tr
   }
   if (response.status === 204) return undefined as T
   const body = await response.json().catch(() => ({}))
-  if (!response.ok) throw new ApiError(response.status, body.message ?? 'Không thể thực hiện yêu cầu.', body.code, body.fieldErrors, body.details)
+  if (!response.ok) {
+    const rawMsg = body.message ?? 'Không thể thực hiện yêu cầu.'
+    const translatedMsg = translateError(rawMsg) || rawMsg
+    const translatedFieldErrors = Array.isArray(body.fieldErrors)
+      ? body.fieldErrors.map((f: { field: string; message: string }) => ({
+          field: f.field,
+          message: translateError(f.message) || f.message,
+        }))
+      : []
+    throw new ApiError(response.status, translatedMsg, body.code, translatedFieldErrors, body.details)
+  }
   if (!body || !Object.prototype.hasOwnProperty.call(body, "data")) {
     if (response.status === 202) return undefined as T
     throw new ApiError(502, "Dịch vụ trả dữ liệu không hợp lệ. Vui lòng thử lại.")

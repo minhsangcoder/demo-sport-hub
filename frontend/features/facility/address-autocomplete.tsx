@@ -32,8 +32,8 @@ export function AddressAutocomplete({ value, onChange, onSelect, disabled, error
     let active = true
     void loadGoogleMaps()
       .then(libraries => { if (active) setPlaces(libraries.places) })
-      .catch(loadError => {
-        if (active) setMessage(loadError instanceof Error ? loadError.message : 'Không thể tải Google Places.')
+      .catch(() => {
+        // Google Maps is optional - fallback to manual input or Leaflet
       })
     return () => { active = false }
   }, [])
@@ -127,8 +127,8 @@ export function AddressAutocomplete({ value, onChange, onSelect, disabled, error
     }
   }
 
-  return <div className="relative grid min-w-0 gap-2 text-sm font-medium">
-    <label htmlFor={`${id}-input`}>Địa chỉ</label>
+  return <div className="relative flex flex-col justify-start min-w-0 gap-2 text-sm font-medium self-start w-full">
+    <label htmlFor={`${id}-input`}>Địa chỉ <span className="ml-1 font-bold text-red-500">*</span></label>
     <Input
       id={`${id}-input`}
       name="addressLine"

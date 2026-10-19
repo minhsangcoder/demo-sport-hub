@@ -43,7 +43,7 @@ export default function RootLayout({
   return (
     <html lang="vi">
       <body className="antialiased">
-        <AuthProvider><AppHeader /><main className="min-h-[calc(100vh-80px)]">{children}</main></AuthProvider>
+        <AuthProvider><AppHeader /><main className="min-h-[calc(100vh-64px)]">{children}</main></AuthProvider>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>

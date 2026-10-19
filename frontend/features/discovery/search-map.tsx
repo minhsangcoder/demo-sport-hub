@@ -135,7 +135,7 @@ export function SearchMap({ results }: { results: DiscoveryResult[] }) {
           {selected.courts.map(court => <article key={court.courtId} className="rounded-xl border bg-white p-4">
             <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">{court.sportName} · {court.date}</p>
             <h4 className="mt-1 font-bold">{court.courtName}</h4>
-            <p className="mt-2 font-semibold text-emerald-800">Từ {money(court.fromPrice, court.currency)} <span className="text-xs font-normal text-slate-500">/ slot</span></p>
+            <p className="mt-2 font-semibold text-emerald-800">Từ {money(court.fromPrice, court.currency)} <span className="text-xs font-normal text-slate-500">/h</span></p>
             <p className="mt-1 text-sm text-slate-600">{court.availableSlots} slot phù hợp{court.distanceKm != null ? ` · ${court.distanceKm.toFixed(1)} km từ điểm tìm kiếm` : ''}</p>
             <Link href={`/facilities/${selected.facility.id}/courts/${court.courtId}?date=${court.date}`} className="mt-3 flex items-center justify-between text-sm font-semibold text-emerald-700">Chọn giờ chơi<ArrowRight size={16} /></Link>
           </article>)}

@@ -31,6 +31,12 @@ public class DemoIdentitySeeder implements ApplicationRunner {
         seed("staff@sporthub.local", "Nhân viên demo", Set.of(Role.STAFF, Role.CUSTOMER));
         seed("customer@sporthub.local", "Khách hàng demo", Set.of(Role.CUSTOMER));
         seed("customer2@sporthub.local", "Khách hàng thứ hai", Set.of(Role.CUSTOMER));
+        seed("demo.anh@sporthub.local", "Nguyễn Minh Anh (Demo)", Set.of(Role.CUSTOMER));
+        seed("demo.huy@sporthub.local", "Trần Quốc Huy (Demo)", Set.of(Role.CUSTOMER));
+        seed("demo.linh@sporthub.local", "Lê Thùy Linh (Demo)", Set.of(Role.CUSTOMER));
+        seed("demo.trang@sporthub.local", "Phạm Thu Trang (Demo)", Set.of(Role.CUSTOMER));
+        seed("demo.quang@sporthub.local", "Vũ Minh Quang (Demo)", Set.of(Role.CUSTOMER));
+        seed("demo.mai@sporthub.local", "Đỗ Ngọc Mai (Demo)", Set.of(Role.CUSTOMER));
     }
     private void seed(String email, String name, Set<Role> roles) {
         if(users.existsByEmailIgnoreCase(email)) return;

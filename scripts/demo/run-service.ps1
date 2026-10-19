@@ -23,6 +23,7 @@ $env:TRANSFER_DB_URL="jdbc:postgresql://localhost:$($env:POSTGRES_PORT)/transfer
 $env:RABBITMQ_USERNAME=$env:RABBITMQ_DEFAULT_USER
 $env:RABBITMQ_PASSWORD=$env:RABBITMQ_DEFAULT_PASS
 $env:MAIL_PORT=if($env:MAIL_PORT){$env:MAIL_PORT}else{'25'}
+$env:MANAGEMENT_HEALTH_MAIL_ENABLED='false'
 $env:MINIO_ENDPOINT="http://localhost:$($env:MINIO_API_PORT)"
 $env:MINIO_ACCESS_KEY=$env:MINIO_ROOT_USER
 $env:MINIO_SECRET_KEY=$env:MINIO_ROOT_PASSWORD
@@ -33,5 +34,5 @@ $env:SPRING_DATA_REDIS_PORT=$env:REDIS_PORT
 $env:SPRING_DATA_REDIS_PASSWORD=$env:REDIS_PASSWORD
 $demoJarPath=Join-Path $demoRepositoryRoot "backend/$Service/target/$Service-0.0.1-SNAPSHOT.jar"
 if(!(Test-Path -LiteralPath $demoJarPath)) { throw "Build first: mvn -f backend/pom.xml package" }
-& java -Xmx256m -jar $demoJarPath
+& java -Xmx256m "-Dmanagement.health.mail.enabled=false" -jar $demoJarPath
 exit $LASTEXITCODE
