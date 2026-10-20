@@ -293,8 +293,8 @@ async function workspace(role, work) {
                 : [
                     "BOOKING_READ",
                     "BOOKING_CREATE_COUNTER",
+                    "BOOKING_PAYMENT_COUNTER",
                     "BOOKING_CHECK_IN",
-                    "BOOKING_COMPLETE",
                     "SCHEDULE_READ",
                   ],
           },

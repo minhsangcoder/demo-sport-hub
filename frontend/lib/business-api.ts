@@ -20,6 +20,8 @@ const write = <T>(path:string,body:unknown,key?:string,method='POST') => api<T>(
 export const businessApi = {
  favorite:(id:string,save:boolean)=>api<Favorite|void>(`/facilities/${id}/favorite`,{method:save?'PUT':'DELETE'}),
  profile:(facility:string,body:{fullName:string;email?:string;phone?:string;active:boolean;expectedVersion?:number},id?:string)=>write<StaffProfile>(`/staff-profiles/facilities/${facility}${id?'/'+id:''}`,body,undefined,id?'PUT':'POST'),
+ createStaffAccount:(facility:string,body:{fullName:string;email:string;phone?:string;password:string;permissions:string[]})=>write<StaffProfile>(`/staff-profiles/facilities/${facility}/accounts`,body,undefined,'POST'),
+ resetStaffPassword:(facility:string,profileId:string,newPassword:string)=>api(`/staff-profiles/facilities/${facility}/${profileId}/password`,{method:'PUT',body:JSON.stringify({newPassword})}),
  inviteStaff:(f:string,id:string,identifier:string,permissions:string[])=>write<StaffInvitation>(`/staff-profiles/facilities/${f}/${id}/invitations`,{identifier,permissions}),
  lookupStaff:(f:string,identifier:string)=>write<{userId:string;fullName:string;maskedIdentifier:string}>(`/staff-bindings/facilities/${f}/account-lookup`,{identifier}),
  bindStaff:(f:string,identifier:string,permissions:string[])=>write(`/staff-bindings/facilities/${f}`,{identifier,permissions}),

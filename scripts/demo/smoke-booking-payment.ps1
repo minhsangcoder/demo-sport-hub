@@ -31,7 +31,7 @@ try {
  Request POST "/payments/$($payment.id)/demo/complete" @{outcome='SUCCESS'} $customer.accessToken|Out-Null
  $detail=Request GET "/bookings/$($booking.id)" $null $customer.accessToken
  if(@($detail.history|Where-Object action -eq 'CONFIRMED').Count -ne 1){throw 'Duplicate confirmation'}
- Request POST "/staff-bindings/facilities/$($facility.id)" @{identifier='staff@sporthub.local';permissions=@('BOOKING_READ','BOOKING_CREATE_COUNTER','BOOKING_CHECK_IN','BOOKING_COMPLETE','SCHEDULE_READ')} $owner.accessToken|Out-Null
+ Request POST "/staff-bindings/facilities/$($facility.id)" @{identifier='staff@sporthub.local';permissions=@('BOOKING_READ','BOOKING_CREATE_COUNTER','BOOKING_PAYMENT_COUNTER','BOOKING_CHECK_IN','SCHEDULE_READ')} $owner.accessToken|Out-Null
  $staffList=@(Request GET "/bookings/facility/$($facility.id)" $null $staff.accessToken)
  if($booking.id -notin $staffList.id){throw 'Staff scoped booking list failed'}
  Reject 403 GET "/bookings/facility/$([Guid]::NewGuid())" $null $staff.accessToken

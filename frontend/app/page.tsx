@@ -3,7 +3,8 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useAuth } from '@/lib/auth-context'
 import {
   Search,
   Calendar,
@@ -28,6 +29,20 @@ import { Footer } from '@/components/layout/footer'
 
 export default function Home() {
   const router = useRouter()
+  const { user, ready } = useAuth()
+
+  useEffect(() => {
+    if (
+      ready &&
+      user &&
+      user.roles.includes('STAFF') &&
+      !user.roles.includes('OWNER') &&
+      !user.roles.includes('ADMIN')
+    ) {
+      router.replace('/staff/bookings')
+    }
+  }, [user, ready, router])
+
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' })
 
   // State for search widget

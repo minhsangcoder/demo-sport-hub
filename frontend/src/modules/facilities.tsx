@@ -715,8 +715,8 @@ export function MaintenancePage() {
 const permissions: [string, string][] = [
   ["BOOKING_READ", "Xem booking"],
   ["BOOKING_CREATE_COUNTER", "Đặt sân tại quầy"],
+  ["BOOKING_PAYMENT_COUNTER", "Ghi nhận thanh toán tại quầy"],
   ["BOOKING_CHECK_IN", "Check-in"],
-  ["BOOKING_COMPLETE", "Hoàn tất booking"],
   ["SCHEDULE_READ", "Xem lịch & giá"],
 ];
 export function StaffPage() {

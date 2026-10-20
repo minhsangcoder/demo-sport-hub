@@ -15,14 +15,16 @@ import java.util.*;
 
 @Service @Transactional(readOnly=true)
 public class StaffBindingService {
- public static final Set<String> PERMISSIONS=Set.of("BOOKING_READ","BOOKING_CREATE_COUNTER","BOOKING_CHECK_IN","BOOKING_COMPLETE","SCHEDULE_READ","SCHEDULE_MANAGE","COURT_STATUS_MANAGE","COURT_MAINTENANCE_MANAGE","BOOKING_CANCEL_PENDING");
- private final JdbcTemplate jdbc;private final StaffFacilityAccess access;private final UserSecurityLock security;private final ObjectMapper json;private final Validator validator;
- public StaffBindingService(JdbcTemplate jdbc,StaffFacilityAccess access,UserSecurityLock security,ObjectMapper json,Validator validator){this.jdbc=jdbc;this.access=access;this.security=security;this.json=json;this.validator=validator;}
+ public static final Set<String> PERMISSIONS=Set.of("BOOKING_READ","BOOKING_CREATE_COUNTER","BOOKING_PAYMENT_COUNTER","BOOKING_CHECK_IN","SCHEDULE_READ","SCHEDULE_MANAGE","COURT_STATUS_MANAGE","COURT_MAINTENANCE_MANAGE");
+ private final JdbcTemplate jdbc;private final StaffFacilityAccess access;private final UserSecurityLock security;private final ObjectMapper json;private final Validator validator;private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+ public StaffBindingService(JdbcTemplate jdbc,StaffFacilityAccess access,UserSecurityLock security,ObjectMapper json,Validator validator,org.springframework.security.crypto.password.PasswordEncoder passwordEncoder){this.jdbc=jdbc;this.access=access;this.security=security;this.json=json;this.validator=validator;this.passwordEncoder=passwordEncoder;}
  public record Input(@NotBlank @Size(max=255) String identifier,@NotEmpty Set<@NotBlank String> permissions){}
  public record Binding(UUID id,UUID facilityId,UUID userId,String fullName,String email,boolean active,List<String> permissions){}
  public record ProfileInput(@NotBlank @Size(min=2,max=255) String fullName,@Email @Size(max=255) String email,@Pattern(regexp="^\\+?[0-9]{9,15}$") String phone,@NotNull Boolean active){}
  public record ProfileUpdate(@NotBlank @Size(min=2,max=255) String fullName,@Email @Size(max=255) String email,@Pattern(regexp="^\\+?[0-9]{9,15}$") String phone,@NotNull Boolean active,@NotNull @PositiveOrZero Long expectedVersion){}
  public record Profile(UUID id,UUID facilityId,String fullName,String email,String phone,boolean active,UUID bindingId,UUID userId,boolean linked,List<String> permissions,long version){}
+ public record CreateAccountInput(@NotBlank @Size(min=2,max=255) String fullName,@NotBlank @Email @Size(max=255) String email,@Pattern(regexp="^\\+?[0-9]{9,15}$") String phone,@NotBlank @Size(min=6,max=72) String password,@NotEmpty Set<@NotBlank String> permissions){}
+ public record ResetPasswordInput(@NotBlank @Size(min=6,max=72) String newPassword){}
  public record PermissionsInput(@NotNull Set<@NotBlank String> permissions,@NotNull @PositiveOrZero Long expectedVersion){}
  public record PermissionsView(UUID bindingId,List<String> permissions,long version){}
  public record Candidate(UUID userId,String fullName,String maskedIdentifier){}
@@ -67,6 +69,44 @@ public class StaffBindingService {
  public PermissionsView permissions(UUID facility,UUID binding,AuthenticatedUser actor,String token){access.owner(facility,actor,token);binding(facility,binding);return permissionView(binding);}
  @Transactional public void revoke(UUID facility,UUID binding,AuthenticatedUser actor,String token){access.owner(facility,actor,token);facilityLock(facility);revokeBinding(facility,binding,actor.userId());}
  public List<History> history(UUID facility,UUID profile,AuthenticatedUser actor,String token){access.owner(facility,actor,token);var p=scopedProfile(facility,profile);return jdbc.query("SELECT * FROM audit_log WHERE (entity_type='STAFF_PROFILE' AND entity_id=?) OR (entity_type='STAFF_BINDING' AND (entity_id=? OR entity_id::text IN (SELECT new_value->>'bindingId' FROM audit_log WHERE entity_type='STAFF_PROFILE' AND entity_id=? AND action='STAFF_PROFILE_LINKED'))) ORDER BY created_at DESC,id DESC LIMIT 100",(r,n)->new History(r.getObject("id",UUID.class),r.getObject("user_id",UUID.class),r.getString("action"),read(r.getString("old_value")),read(r.getString("new_value")),r.getTimestamp("created_at").toInstant()),profile,p.bindingId(),profile);}
+
+ @Transactional public Profile createAccount(UUID facility,CreateAccountInput input,AuthenticatedUser actor,String token){
+  validate(input);permissions(input.permissions());access.owner(facility,actor,token);facilityLock(facility);
+  String email=email(input.email());
+  String phone=input.phone()==null||input.phone().isBlank()?null:input.phone().trim();
+  if(email!=null&&Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM users WHERE lower(email)=?)",Boolean.class,email))){
+   throw new ConflictException("Email đã được đăng ký trong hệ thống");
+  }
+  if(phone!=null&&Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM users WHERE phone=?)",Boolean.class,phone))){
+   throw new ConflictException("Số điện thoại đã được đăng ký trong hệ thống");
+  }
+  UUID userId=UUID.randomUUID();
+  String hash=passwordEncoder.encode(input.password());
+  jdbc.update("INSERT INTO users(id,email,phone,password_hash,status,email_verified,phone_verified,created_at,updated_at) VALUES(?,?,?,?,?,?,?,NOW(),NOW())",
+   userId,email,phone,hash,"ACTIVE",email!=null,phone!=null);
+  jdbc.update("INSERT INTO user_profiles(user_id,full_name,created_at,updated_at) VALUES(?,?,NOW(),NOW())",userId,input.fullName().trim());
+  jdbc.update("INSERT INTO user_roles(user_id,role) VALUES(?,'STAFF')",userId);
+  UUID bindingId=UUID.randomUUID();
+  jdbc.update("INSERT INTO staff_facility_bindings(id,staff_user_id,facility_id,assigned_by,is_active,version,created_at,updated_at) VALUES(?,?,?,?,true,1,NOW(),NOW())",
+   bindingId,userId,facility,actor.userId());
+  setPermissions(bindingId,input.permissions());
+  UUID profileId=UUID.randomUUID();
+  jdbc.update("INSERT INTO staff_profiles(id,facility_id,full_name,contact_email,contact_phone,is_active,binding_id,created_by,version,created_at,updated_at) VALUES(?,?,?,?,?,true,?,?,1,NOW(),NOW())",
+   profileId,facility,input.fullName().trim(),email,phone,bindingId,actor.userId());
+  audit(actor.userId(),"STAFF_ACCOUNT_CREATED","STAFF_PROFILE",profileId,null,Map.of("userId",userId,"email",Objects.toString(email,""),"facilityId",facility,"permissions",input.permissions()));
+  return profile(profileId);
+ }
+
+ @Transactional public void resetPassword(UUID facility,UUID profileId,ResetPasswordInput input,AuthenticatedUser actor,String token){
+  validate(input);access.owner(facility,actor,token);facilityLock(facility);
+  var p=scopedProfile(facility,profileId);
+  if(p.userId()==null||!p.linked())throw new ConflictException("Hồ sơ nhân viên chưa liên kết tài khoản");
+  security.lock(p.userId());
+  String hash=passwordEncoder.encode(input.newPassword());
+  jdbc.update("UPDATE users SET password_hash=?,updated_at=NOW() WHERE id=?",hash,p.userId());
+  jdbc.update("UPDATE refresh_tokens SET revoked=true,revoked_at=NOW() WHERE user_id=? AND NOT revoked",p.userId());
+  audit(actor.userId(),"STAFF_PASSWORD_RESET","USER",p.userId(),null,Map.of("facilityId",facility,"profileId",profileId));
+ }
 
  private void revokeBinding(UUID facility,UUID id,UUID actor){var before=binding(facility,id);security.lock(before.userId());if(!before.active())return;jdbc.update("UPDATE staff_facility_bindings SET is_active=false,version=version+1,updated_at=NOW() WHERE id=?",id);jdbc.queryForList("SELECT id FROM staff_profiles WHERE binding_id=?",UUID.class,id).forEach(p->cancelInvitations(p,actor));audit(actor,"STAFF_REVOKED","STAFF_BINDING",id,before,binding(facility,id));}
  private void cancelInvitations(UUID profile,UUID actor){for(UUID id:jdbc.queryForList("SELECT id FROM staff_invitations WHERE profile_id=? AND state IN ('PENDING','ACCEPTED') FOR UPDATE",UUID.class,profile)){var before=invitation(id);jdbc.update("UPDATE staff_invitations SET state='CANCELLED' WHERE id=?",id);audit(actor,"STAFF_INVITATION_CANCELLED","STAFF_PROFILE",profile,before,invitation(id));}}

@@ -2,7 +2,8 @@
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useAuth } from '@/lib/auth-context'
 import { MapPin,ArrowRight,SlidersHorizontal } from 'lucide-react'
 import { useApi } from '@/lib/use-api'
 import { Input } from '@/components/ui/input'
@@ -16,7 +17,22 @@ const SearchMap=dynamic(()=>import('./search-map').then(module=>module.SearchMap
 const fields=['q','sportCategoryId','provinceCode','date','opensAfter','closesBefore','minPrice','maxPrice','latitude','longitude','radiusKm','sort']
 const selectStyle='h-12 w-full rounded-md border border-input bg-white px-3 text-sm text-slate-900'
 export function SearchPage({initial,today}:{initial:Record<string,string>;today:string}){
- const router=useRouter();const filters=Object.fromEntries(fields.map(name=>[name,initial[name]??(name==='date'?today:name==='sort'?'NAME':'')]))
+ const router=useRouter()
+ const { user, ready } = useAuth()
+
+ useEffect(() => {
+   if (
+     ready &&
+     user &&
+     user.roles.includes('STAFF') &&
+     !user.roles.includes('OWNER') &&
+     !user.roles.includes('ADMIN')
+   ) {
+     router.replace('/staff/bookings')
+   }
+ }, [user, ready, router])
+
+ const filters=Object.fromEntries(fields.map(name=>[name,initial[name]??(name==='date'?today:name==='sort'?'NAME':'')]))
  const mapView=initial.view==='map'
  const pastDate=Boolean(/^\d{4}-\d{2}-\d{2}$/.test(filters.date)&&filters.date<today);if(pastDate)filters.date=today
  const [categoryId,setCategoryId]=useState(filters.sportCategoryId)

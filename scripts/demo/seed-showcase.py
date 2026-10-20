@@ -18,8 +18,8 @@ ROOT = Path(__file__).resolve().parents[2]
 # Modern Vietnamese demo dates use UTC+07; avoid requiring an IANA database on Windows.
 ZONE = timezone(timedelta(hours=7), name="Asia/Ho_Chi_Minh")
 MARKER = "Bộ dữ liệu SportHub Showcase."
-PERMISSIONS = ["BOOKING_READ", "BOOKING_CREATE_COUNTER", "BOOKING_CHECK_IN",
-               "BOOKING_COMPLETE", "SCHEDULE_READ"]
+PERMISSIONS = ["BOOKING_READ", "BOOKING_CREATE_COUNTER", "BOOKING_PAYMENT_COUNTER",
+               "BOOKING_CHECK_IN", "SCHEDULE_READ"]
 CUSTOMERS = ["demo." + name for name in ("anh", "huy", "linh", "trang", "quang", "mai")]
 # These are fictional venues; administrative names come from the canonical dataset.
 VENUES = [

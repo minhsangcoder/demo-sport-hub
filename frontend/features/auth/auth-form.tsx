@@ -148,8 +148,17 @@ export function AuthForm({ mode: initialMode = 'login' }: { mode?: Mode }) {
 
     try {
       if (mode === 'login') {
-        await authApi.login(value('identifier'), String(values.get('password') ?? ''))
-        router.push(postLoginPath(params.get('next')))
+        const session = await authApi.login(value('identifier'), String(values.get('password') ?? ''))
+        const next = params.get('next')
+        if (
+          session.user.roles.includes('STAFF') &&
+          !session.user.roles.includes('OWNER') &&
+          !session.user.roles.includes('ADMIN')
+        ) {
+          router.push(next && next !== '/' ? postLoginPath(next) : '/staff/bookings')
+        } else {
+          router.push(postLoginPath(next))
+        }
       } else if (mode === 'register') {
         const contact = value('identifier')
         const account = {

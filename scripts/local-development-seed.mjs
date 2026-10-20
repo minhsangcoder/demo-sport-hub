@@ -76,7 +76,7 @@ try {
   await call('admin','POST',`/admin/owner-applications/${app.id}/decision`,{action:'APPROVE',reason:'Phê duyệt hồ sơ mô phỏng để trình diễn trong development; tài liệu không có giá trị pháp lý.',commissionPercent:5})
   await poll(()=>call('admin','GET',`/admin/owner-applications/${app.id}`),d=>d.application.state==='APPROVED')
   assert.ok((await login('owner')).user.roles.includes('OWNER'))
-  const permissions=['BOOKING_READ','BOOKING_CREATE_COUNTER','BOOKING_CHECK_IN','BOOKING_COMPLETE','SCHEDULE_READ','BOOKING_CANCEL_PENDING','SCHEDULE_MANAGE','COURT_STATUS_MANAGE','COURT_MAINTENANCE_MANAGE']
+  const permissions=['BOOKING_READ','BOOKING_CREATE_COUNTER','BOOKING_PAYMENT_COUNTER','BOOKING_CHECK_IN','SCHEDULE_READ','SCHEDULE_MANAGE','COURT_STATUS_MANAGE','COURT_MAINTENANCE_MANAGE']
   const profile=await call('owner','POST',`/staff-profiles/facilities/${fid}`,{fullName:'Nhân viên Demo',email:actors.staff.email,active:true})
   const invitation=await call('owner','POST',`/staff-profiles/facilities/${fid}/${profile.id}/invitations`,{identifier:actors.staff.email,permissions})
   await call('staff','POST',`/users/me/staff-invitations/${invitation.id}/accept`)

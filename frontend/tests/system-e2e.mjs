@@ -93,7 +93,7 @@ try{
   assert.equal((await call('guest','GET',`/facilities/${fid}`)).status,'ACTIVE')
   record('Genuine first Owner application/draft court/hours/pricing/MinIO multipart/submit/Admin approval/role and publication saga')
   // Staff consent then binding, live permission reads. No synthetic STAFF role.
-  const permissions=['BOOKING_READ','BOOKING_CREATE_COUNTER','BOOKING_CHECK_IN','BOOKING_COMPLETE','SCHEDULE_READ','BOOKING_CANCEL_PENDING']
+  const permissions=['BOOKING_READ','BOOKING_CREATE_COUNTER','BOOKING_PAYMENT_COUNTER','BOOKING_CHECK_IN','SCHEDULE_READ']
   const profile=await call('owner','POST',`/staff-profiles/facilities/${fid}`,{fullName:'Synthetic operator',email:actors.staff.email,active:true})
   const invitation=await call('owner','POST',`/staff-profiles/facilities/${fid}/${profile.id}/invitations`,{identifier:actors.staff.email,permissions})
   await call('staff','POST',`/users/me/staff-invitations/${invitation.id}/accept`)

@@ -54,8 +54,8 @@ export function useOperationalFacility(permission: string, owner = false) {
         permissions: [
           "BOOKING_READ",
           "BOOKING_CREATE_COUNTER",
+          "BOOKING_PAYMENT_COUNTER",
           "BOOKING_CHECK_IN",
-          "BOOKING_COMPLETE",
           "SCHEDULE_READ",
         ],
       }))
@@ -508,7 +508,7 @@ export function OperationBooking({
   const r = useResource<{ booking: Booking }>(`/bookings/${id}`),
     access = useResource<Access>(owner ? null : "/users/me/access");
   const permissions = owner
-    ? ["BOOKING_CHECK_IN", "BOOKING_COMPLETE"]
+    ? ["BOOKING_CHECK_IN"]
     : (access.data?.facilityBindings.find(
         (b) => b.facilityId === r.data?.booking.facilityId,
       )?.permissions ?? []);

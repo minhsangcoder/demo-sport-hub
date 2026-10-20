@@ -28,7 +28,12 @@ public class DemoIdentitySeeder implements ApplicationRunner {
     @Override @Transactional public void run(ApplicationArguments args) {
         seed("admin@sporthub.local", "Quản trị demo", Set.of(Role.ADMIN, Role.CUSTOMER));
         seed("owner@sporthub.local", "Chủ cơ sở demo", Set.of(Role.OWNER, Role.CUSTOMER));
-        seed("staff@sporthub.local", "Nhân viên demo", Set.of(Role.STAFF, Role.CUSTOMER));
+        seed("owner2@sporthub.local", "Hoàng Văn Nam (Chủ Sân Ba Đình)", Set.of(Role.OWNER, Role.CUSTOMER));
+        seed("owner3@sporthub.local", "Trần Thị Mai Phương (Chủ Sân Tây Hồ)", Set.of(Role.OWNER, Role.CUSTOMER));
+        seed("owner4@sporthub.local", "Lê Hoàng Long (Chủ Cơ Sở Mới)", Set.of(Role.OWNER, Role.CUSTOMER));
+        seed("staff@sporthub.local", "Nhân viên demo", Set.of(Role.STAFF));
+        seed("staff.badinh@sporthub.local", "Nguyễn Văn Tuấn (Lễ tân Ba Đình)", Set.of(Role.STAFF));
+        seed("staff.tayho@sporthub.local", "Lê Thu Hà (Lễ tân Tây Hồ)", Set.of(Role.STAFF));
         seed("customer@sporthub.local", "Khách hàng demo", Set.of(Role.CUSTOMER));
         seed("customer2@sporthub.local", "Khách hàng thứ hai", Set.of(Role.CUSTOMER));
         seed("demo.anh@sporthub.local", "Nguyễn Minh Anh (Demo)", Set.of(Role.CUSTOMER));

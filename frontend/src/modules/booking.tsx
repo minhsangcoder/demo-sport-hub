@@ -560,23 +560,7 @@ export function BookingDetailPage({
                       <Button busy={action.busy}>Xác nhận check-in</Button>
                     </form>
                   )}
-                {operations &&
-                  permissions.includes("BOOKING_COMPLETE") &&
-                  b.status === "CHECKED_IN" && (
-                    <Button
-                      busy={action.busy}
-                      onClick={() => {
-                        void action.run(
-                          () =>
-                            api(`/bookings/${id}/complete`, { method: "POST" }),
-                          () => resource.reload(),
-                        );
-                      }}
-                    >
-                      Hoàn tất sử dụng sân
-                    </Button>
-                  )}
-              </Panel>
+               </Panel>
               <Panel title="Hành trình booking">
                 <ol className="timeline">
                   {resource.data?.history.map((h) => (

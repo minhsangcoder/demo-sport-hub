@@ -21,12 +21,16 @@ import {
   X,
   ChevronDown,
   Sparkles,
+  CalendarCheck2,
 } from 'lucide-react'
 
 export function AppHeader() {
   const { user, ready } = useAuth()
   const router = useRouter()
   const pathname = usePathname()
+  const isStaffOnly = Boolean(
+    user && user.roles.includes('STAFF') && !user.roles.includes('OWNER') && !user.roles.includes('ADMIN')
+  )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [userMenuOpen, setUserMenuOpen] = useState(false)
@@ -74,7 +78,7 @@ export function AppHeader() {
         {/* Brand Logo & Desktop Nav */}
         <div className="flex items-center gap-4 lg:gap-8 min-w-0">
           <Link
-            href="/"
+            href={isStaffOnly ? '/staff/bookings' : '/'}
             className="group flex items-center gap-2 sm:gap-2.5 text-xl font-black tracking-tight text-slate-900 transition-opacity hover:opacity-95 dark:text-white shrink-0"
           >
             <div className="flex size-8 sm:size-9 items-center justify-center rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white shadow-md shadow-emerald-600/20 group-hover:scale-105 transition-all shrink-0">
@@ -87,19 +91,21 @@ export function AppHeader() {
 
           {/* Desktop Navigation */}
           <nav aria-label="Điều hướng chính" className="hidden md:flex items-center gap-1 text-sm font-semibold text-slate-600 dark:text-slate-300">
-            <Link
-              href="/search"
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-2 transition-colors whitespace-nowrap ${
-                isActive('/search')
-                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
-                  : 'hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white'
-              }`}
-            >
-              <Search size={15} />
-              <span>Tìm sân</span>
-            </Link>
+            {!isStaffOnly && (
+              <Link
+                href="/search"
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-2 transition-colors whitespace-nowrap ${
+                  isActive('/search')
+                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
+                    : 'hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white'
+                }`}
+              >
+                <Search size={15} />
+                <span>Tìm sân</span>
+              </Link>
+            )}
 
-            {user?.roles.includes('CUSTOMER') && (
+            {!isStaffOnly && user?.roles.includes('CUSTOMER') && (
               <Link
                 href="/transfers"
                 className={`flex items-center gap-1.5 rounded-lg px-3 py-2 transition-colors whitespace-nowrap ${
@@ -113,7 +119,7 @@ export function AppHeader() {
               </Link>
             )}
 
-            {user && (
+            {!isStaffOnly && user?.roles.includes('CUSTOMER') && (
               <Link
                 href="/customer/groups"
                 className={`flex items-center gap-1.5 rounded-lg px-3 py-2 transition-colors whitespace-nowrap ${
@@ -127,7 +133,7 @@ export function AppHeader() {
               </Link>
             )}
 
-            {user && (
+            {!isStaffOnly && user?.roles.includes('CUSTOMER') && (
               <Link
                 href="/customer/bookings"
                 className={`flex items-center gap-1.5 rounded-lg px-3 py-2 transition-colors whitespace-nowrap ${
@@ -139,6 +145,33 @@ export function AppHeader() {
                 <Calendar size={15} />
                 <span>Lịch đặt</span>
               </Link>
+            )}
+
+            {isStaffOnly && (
+              <>
+                <Link
+                  href="/staff/bookings"
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-2 transition-colors whitespace-nowrap ${
+                    isActive('/staff/bookings')
+                      ? 'bg-emerald-50 text-emerald-700 font-bold dark:bg-emerald-950/60 dark:text-emerald-400'
+                      : 'hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white'
+                  }`}
+                >
+                  <Briefcase size={15} className="text-emerald-600" />
+                  <span>Kiểm Tra Booking</span>
+                </Link>
+                <Link
+                  href="/staff/counter-booking"
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-2 transition-colors whitespace-nowrap ${
+                    isActive('/staff/counter-booking')
+                      ? 'bg-emerald-50 text-emerald-700 font-bold dark:bg-emerald-950/60 dark:text-emerald-400'
+                      : 'hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white'
+                  }`}
+                >
+                  <CalendarCheck2 size={15} />
+                  <span>Đặt tại quầy</span>
+                </Link>
+              </>
             )}
           </nav>
         </div>
@@ -156,7 +189,7 @@ export function AppHeader() {
             </Link>
           )}
 
-          {user?.roles.includes('CUSTOMER') && !user.roles.includes('OWNER') && (
+          {user?.roles.includes('CUSTOMER') && !user.roles.includes('OWNER') && !isStaffOnly && (
             <Link
               href="/owner/application"
               className="hidden lg:flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-1.5 text-xs font-bold text-amber-800 shadow-sm transition-colors hover:bg-amber-100 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300 whitespace-nowrap"
@@ -166,13 +199,13 @@ export function AppHeader() {
             </Link>
           )}
 
-          {user?.roles.includes('STAFF') && (
+          {user?.roles.includes('STAFF') && !isStaffOnly && (
             <Link
               href="/staff/bookings"
               className="hidden lg:flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50/70 px-3 py-1.5 text-xs font-bold text-blue-800 shadow-sm transition-colors hover:bg-blue-100 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-300 whitespace-nowrap"
             >
               <Briefcase size={13} className="text-blue-600" />
-              <span>Vận hành</span>
+              <span>Kiểm Tra Booking</span>
             </Link>
           )}
 
@@ -248,39 +281,61 @@ export function AppHeader() {
                   </div>
 
                   {/* Customer Links */}
-                  <div className="py-1 text-sm font-medium text-slate-700 dark:text-slate-300">
-                    <Link
-                      href="/customer/bookings"
-                      className="flex items-center gap-2.5 rounded-lg px-3 py-2 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
-                    >
-                      <Calendar size={16} className="text-emerald-600" />
-                      <span>Lịch đặt của tôi</span>
-                    </Link>
-                    <Link
-                      href="/customer/groups"
-                      className="flex items-center gap-2.5 rounded-lg px-3 py-2 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
-                    >
-                      <Users size={16} className="text-emerald-600" />
-                      <span>Hội nhóm thể thao</span>
-                    </Link>
-                    <Link
-                      href="/customer/favorites"
-                      className="flex items-center gap-2.5 rounded-lg px-3 py-2 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
-                    >
-                      <Heart size={16} className="text-emerald-600" />
-                      <span>Sân yêu thích</span>
-                    </Link>
-                    <Link
-                      href="/customer/profile"
-                      className="flex items-center gap-2.5 rounded-lg px-3 py-2 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
-                    >
-                      <User size={16} className="text-emerald-600" />
-                      <span>Hồ sơ cá nhân</span>
-                    </Link>
-                  </div>
+                  {!isStaffOnly && (
+                    <div className="py-1 text-sm font-medium text-slate-700 dark:text-slate-300">
+                      <Link
+                        href="/customer/bookings"
+                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
+                      >
+                        <Calendar size={16} className="text-emerald-600" />
+                        <span>Lịch đặt của tôi</span>
+                      </Link>
+                      <Link
+                        href="/customer/groups"
+                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
+                      >
+                        <Users size={16} className="text-emerald-600" />
+                        <span>Hội nhóm thể thao</span>
+                      </Link>
+                      <Link
+                        href="/customer/favorites"
+                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
+                      >
+                        <Heart size={16} className="text-emerald-600" />
+                        <span>Sân yêu thích</span>
+                      </Link>
+                      <Link
+                        href="/customer/profile"
+                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
+                      >
+                        <User size={16} className="text-emerald-600" />
+                        <span>Hồ sơ cá nhân</span>
+                      </Link>
+                    </div>
+                  )}
+
+                  {/* Staff Dedicated Links */}
+                  {isStaffOnly && (
+                    <div className="py-1 text-sm font-medium text-slate-700 dark:text-slate-300">
+                      <Link
+                        href="/staff/bookings"
+                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold text-slate-900 dark:text-white"
+                      >
+                        <Briefcase size={16} className="text-emerald-600" />
+                        <span>Kiểm Tra Booking</span>
+                      </Link>
+                      <Link
+                        href="/staff/counter-booking"
+                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
+                      >
+                        <CalendarCheck2 size={16} className="text-emerald-600" />
+                        <span>Đặt tại quầy</span>
+                      </Link>
+                    </div>
+                  )}
 
                   {/* Portals Divider */}
-                  {(user.roles.includes('OWNER') || user.roles.includes('STAFF') || user.roles.includes('ADMIN')) && (
+                  {(user.roles.includes('OWNER') || user.roles.includes('ADMIN') || (user.roles.includes('STAFF') && !isStaffOnly)) && (
                     <div className="border-t border-slate-100 py-1 dark:border-slate-800">
                       {user.roles.includes('OWNER') && (
                         <Link
@@ -291,13 +346,13 @@ export function AppHeader() {
                           <span>Cơ sở của tôi</span>
                         </Link>
                       )}
-                      {user.roles.includes('STAFF') && (
+                      {user.roles.includes('STAFF') && !isStaffOnly && (
                         <Link
                           href="/staff/bookings"
                           className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-blue-50 dark:text-slate-200 dark:hover:bg-blue-950"
                         >
                           <Briefcase size={16} className="text-blue-600" />
-                          <span>Vận hành & Quầy sân</span>
+                          <span>Kiểm Tra Booking</span>
                         </Link>
                       )}
                       {user.roles.includes('ADMIN') && (
@@ -397,117 +452,148 @@ export function AppHeader() {
 
           {/* Navigation Links */}
           <nav className="space-y-1 font-semibold text-slate-700 dark:text-slate-200">
-            <Link
-              href="/search"
-              onClick={() => setMobileMenuOpen(false)}
-              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
-                isActive('/search')
-                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
-                  : 'hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-            >
-              <Search size={18} className="text-emerald-600" />
-              <span>Tìm kiếm sân</span>
-            </Link>
-
-            {user?.roles.includes('CUSTOMER') && (
-              <Link
-                href="/transfers"
-                onClick={() => setMobileMenuOpen(false)}
-                className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
-                  isActive('/transfers')
-                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
-                    : 'hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-              >
-                <Repeat size={18} className="text-emerald-600" />
-                <span>Chợ chuyển nhượng vé</span>
-              </Link>
-            )}
-
-            {user && (
+            {isStaffOnly ? (
               <>
                 <Link
-                  href="/customer/bookings"
+                  href="/staff/bookings"
                   onClick={() => setMobileMenuOpen(false)}
                   className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
-                    isActive('/customer/bookings')
-                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
+                    isActive('/staff/bookings')
+                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 font-bold'
                       : 'hover:bg-slate-100 dark:hover:bg-slate-800'
                   }`}
                 >
-                  <Calendar size={18} className="text-emerald-600" />
-                  <span>Lịch đặt của tôi</span>
+                  <Briefcase size={18} className="text-emerald-600" />
+                  <span>Kiểm Tra Booking</span>
                 </Link>
                 <Link
-                  href="/customer/groups"
+                  href="/staff/counter-booking"
                   onClick={() => setMobileMenuOpen(false)}
                   className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
-                    isActive('/customer/groups')
-                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
+                    isActive('/staff/counter-booking')
+                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 font-bold'
                       : 'hover:bg-slate-100 dark:hover:bg-slate-800'
                   }`}
                 >
-                  <Users size={18} className="text-emerald-600" />
-                  <span>Hội nhóm & Chia tiền</span>
-                </Link>
-                <Link
-                  href="/customer/favorites"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
-                    isActive('/customer/favorites')
-                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
-                      : 'hover:bg-slate-100 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <Heart size={18} className="text-emerald-600" />
-                  <span>Sân yêu thích</span>
-                </Link>
-                <Link
-                  href="/customer/profile"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
-                    isActive('/customer/profile')
-                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
-                      : 'hover:bg-slate-100 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <User size={18} className="text-emerald-600" />
-                  <span>Hồ sơ cá nhân</span>
+                  <CalendarCheck2 size={18} className="text-emerald-600" />
+                  <span>Đặt tại quầy</span>
                 </Link>
               </>
-            )}
+            ) : (
+              <>
+                <Link
+                  href="/search"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
+                    isActive('/search')
+                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
+                      : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <Search size={18} className="text-emerald-600" />
+                  <span>Tìm kiếm sân</span>
+                </Link>
 
-            {/* Role Links */}
-            {user?.roles.includes('OWNER') && (
-              <Link
-                href="/owner/facilities"
-                onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950"
-              >
-                <Building2 size={18} />
-                <span>Không gian Chủ sân</span>
-              </Link>
-            )}
-            {user?.roles.includes('CUSTOMER') && !user.roles.includes('OWNER') && (
-              <Link
-                href="/owner/application"
-                onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-amber-700 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950"
-              >
-                <Sparkles size={18} className="text-amber-600" />
-                <span>Đăng ký trở thành chủ sân</span>
-              </Link>
-            )}
-            {user?.roles.includes('STAFF') && (
-              <Link
-                href="/staff/bookings"
-                onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950"
-              >
-                <Briefcase size={18} />
-                <span>Vận hành & Quầy sân</span>
-              </Link>
+                {user?.roles.includes('CUSTOMER') && (
+                  <Link
+                    href="/transfers"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
+                      isActive('/transfers')
+                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
+                        : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <Repeat size={18} className="text-emerald-600" />
+                    <span>Chợ chuyển nhượng vé</span>
+                  </Link>
+                )}
+
+                {user && (
+                  <>
+                    <Link
+                      href="/customer/bookings"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
+                        isActive('/customer/bookings')
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
+                          : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <Calendar size={18} className="text-emerald-600" />
+                      <span>Lịch đặt của tôi</span>
+                    </Link>
+                    <Link
+                      href="/customer/groups"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
+                        isActive('/customer/groups')
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
+                          : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <Users size={18} className="text-emerald-600" />
+                      <span>Hội nhóm & Chia tiền</span>
+                    </Link>
+                    <Link
+                      href="/customer/favorites"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
+                        isActive('/customer/favorites')
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
+                          : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <Heart size={18} className="text-emerald-600" />
+                      <span>Sân yêu thích</span>
+                    </Link>
+                    <Link
+                      href="/customer/profile"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
+                        isActive('/customer/profile')
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
+                          : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <User size={18} className="text-emerald-600" />
+                      <span>Hồ sơ cá nhân</span>
+                    </Link>
+                  </>
+                )}
+
+                {/* Role Links */}
+                {user?.roles.includes('OWNER') && (
+                  <Link
+                    href="/owner/facilities"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950"
+                  >
+                    <Building2 size={18} />
+                    <span>Không gian Chủ sân</span>
+                  </Link>
+                )}
+                {user?.roles.includes('CUSTOMER') && !user.roles.includes('OWNER') && (
+                  <Link
+                    href="/owner/application"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-amber-700 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950"
+                  >
+                    <Sparkles size={18} className="text-amber-600" />
+                    <span>Đăng ký trở thành chủ sân</span>
+                  </Link>
+                )}
+                {user?.roles.includes('STAFF') && (
+                  <Link
+                    href="/staff/bookings"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950"
+                  >
+                    <Briefcase size={18} />
+                    <span>Kiểm Tra Booking</span>
+                  </Link>
+                )}
+              </>
             )}
             {user?.roles.includes('ADMIN') && (
               <Link
