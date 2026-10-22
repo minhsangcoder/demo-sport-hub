@@ -27,7 +27,7 @@ import java.util.concurrent.*;
 @org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 class BookingIntegrationTest {
  static PostgreSQLContainer<?> postgres;
- @DynamicPropertySource static void db(DynamicPropertyRegistry p){String url=System.getenv("SPORTHUB_BOOKING_TEST_DB_URL");if(url!=null){p.add("spring.datasource.url",()->url);p.add("spring.datasource.username",()->System.getenv("SPORTHUB_TEST_DB_USER"));p.add("spring.datasource.password",()->System.getenv("SPORTHUB_TEST_DB_PASSWORD"));}else{postgres=new PostgreSQLContainer<>("postgres:16-alpine");postgres.start();p.add("spring.datasource.url",postgres::getJdbcUrl);p.add("spring.datasource.username",postgres::getUsername);p.add("spring.datasource.password",postgres::getPassword);}}
+ @DynamicPropertySource static void db(DynamicPropertyRegistry p){String url=System.getenv("SPORTHUB_BOOKING_TEST_DB_URL");if(url!=null){p.add("spring.datasource.url",()->url);p.add("spring.datasource.username",()->System.getenv("SPORTHUB_TEST_DB_USER"));p.add("spring.datasource.password",()->System.getenv("SPORTHUB_TEST_DB_PASSWORD"));}else{postgres=new PostgreSQLContainer<>("postgres:16-alpine").withInitScript("booking-test-prerequisites.sql");postgres.start();p.add("spring.datasource.url",postgres::getJdbcUrl);p.add("spring.datasource.username",postgres::getUsername);p.add("spring.datasource.password",postgres::getPassword);}}
  @AfterAll static void stop(){if(postgres!=null)postgres.stop();}
  @Autowired ConfigurationGuardService configuration;
  @Autowired BookingLifecycle lifecycle;
@@ -39,18 +39,184 @@ class BookingIntegrationTest {
  @MockBean com.sporthub.common.security.RemoteIdentity identity;
  @MockBean ReliableOutbox outbox;
  @Autowired GroupService groups;
+ @Autowired LegacyRefundPolicyAdoption adoptions;
+ @Autowired LocalAppliedCollections appliedCollections;
  @Autowired org.springframework.test.web.servlet.MockMvc http;
  @Autowired org.springframework.transaction.PlatformTransactionManager txManager;
  @Autowired TransferLeaseService transfers;
+ @Autowired BookingDemoFinance demoFinance;
+ @Autowired BookingPolicyCancellation policyCancellation;
+ @Autowired FacilityDemoReportingService demoReports;
+ @MockBean PaymentEvidenceClient paymentEvidence;
  @Autowired com.sporthub.booking.web.BookingMonitoringController monitoring;
  Instant now=Instant.parse("2026-10-05T00:00:00Z"),start=now.plusSeconds(3600),end=now.plusSeconds(7200);
  UUID court,facility;Caller user;JsonNode quote;
  @BeforeEach void setup(){court=UUID.randomUUID();facility=UUID.randomUUID();user=customer();when(clock.instant()).thenReturn(now);when(clock.getZone()).thenReturn(ZoneOffset.UTC);
   quote=json.valueToTree(Map.of("facilityId",facility,"courtId",court,"startsAt",start,"endsAt",end,"amount",150000,"currency","VND","timezone","Asia/Ho_Chi_Minh","segments",List.of()));when(dependencies.quote(any())).thenReturn(quote);
+  ((com.fasterxml.jackson.databind.node.ObjectNode)quote).set("refundPolicy",policy(facility,8000,1));
+  when(dependencies.refundPolicy(any())).thenAnswer(a->policy(a.getArgument(0),8000,1));
  }
+ JsonNode policy(UUID id,int rate,long version){return json.valueToTree(Map.of("configured",true,"id",UUID.nameUUIDFromBytes((id+"|"+version).getBytes(java.nio.charset.StandardCharsets.UTF_8)),"version",version,"rateBps",rate,"currency","VND","rounding","HALF_UP","termsHash",com.sporthub.common.security.Signatures.sha256(id+"|"+version+"|"+rate+"|VND|HALF_UP|FACILITY_POLICY_CANCELLATION")));}
  Caller customer(){return new Caller(UUID.randomUUID(),"Customer",Set.of("CUSTOMER"),Map.of());}
  HoldInput input(){return new HoldInput(court,start,end,new BigDecimal("150000"));}
  String key(){return UUID.randomUUID().toString();}
+ Booking legacyConfirmedProof(boolean receipt,boolean history,boolean wrongFingerprint){
+  UUID id=UUID.randomUUID(),reservation=UUID.randomUUID(),courtId=UUID.randomUUID(),payment=UUID.randomUUID();
+  new org.springframework.transaction.support.TransactionTemplate(txManager).executeWithoutResult(tx->{
+   repo.jdbc().update("INSERT INTO slot_reservations(id,court_id,facility_id,holder_id,starts_at,ends_at,expires_at,state,quote) VALUES(?,?,?,?,?,?,?,'BOOKED','{}')",reservation,courtId,facility,user.id(),java.sql.Timestamp.from(start),java.sql.Timestamp.from(end),java.sql.Timestamp.from(now.plusSeconds(600)));
+   repo.jdbc().update("INSERT INTO bookings(id,reservation_id,facility_id,court_id,created_by,customer_id,current_holder_id,starts_at,ends_at,status,source,amount,currency,price_snapshot,hold_expires_at,payment_id,paid_at) VALUES(?,?,?,?,?,?,?,?,?,'CONFIRMED','ONLINE',150000,'VND','{}',?,?,?)",id,reservation,facility,courtId,user.id(),user.id(),user.id(),java.sql.Timestamp.from(start),java.sql.Timestamp.from(end),java.sql.Timestamp.from(now.plusSeconds(600)),payment,java.sql.Timestamp.from(now));
+   if(receipt)repo.jdbc().update("INSERT INTO booking_payment_receipts(payment_id,booking_id,fingerprint) VALUES(?,?,?)",payment,id,wrongFingerprint?"0".repeat(64):com.sporthub.common.money.BookingPaymentFingerprint.of(id,user.id(),"","BOOKING","SUCCESS",new BigDecimal("150000"),"VND",now));
+   if(history)repo.history(id,user.id(),"CONFIRMED",Map.of("paymentId",payment));
+  });return repo.find(id);
+ }
+ @Test void paymentProofGuardRejectsConfirmedLegacyWithoutReceiptThroughDirectHttp()throws Exception{
+  scopedPermissions();var b=legacyConfirmedProof(false,true,false);when(clock.instant()).thenReturn(start.minusSeconds(60));var actor=counterStaff("BOOKING_CHECK_IN");when(identity.current(any())).thenReturn(actor);
+  http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/bookings/facility/"+facility+"/check-in-by-code").contentType("application/json").content(json.writeValueAsString(new CodeInput(b.bookingCode())))).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isConflict());
+  assertThat(repo.find(b.id()).status()).isEqualTo("CONFIRMED");assertThat(repo.history(b.id())).noneMatch(h->h.action().equals("CHECKED_IN"));
+  assertThat(appliedCollections.load(List.of(b)).assessments().get(b.id()).reasons()).contains("MISSING_OR_WRONG_RECEIPT");
+ }
+ @Test void paymentProofGuardRejectsWrongFingerprintOrMissingSuccessHistory(){
+  scopedPermissions();var wrong=legacyConfirmedProof(true,true,true);var missing=legacyConfirmedProof(true,false,false);when(clock.instant()).thenReturn(start.minusSeconds(60));var actor=counterStaff("BOOKING_CHECK_IN");
+  var snapshot=appliedCollections.load(List.of(wrong,missing));assertThat(snapshot.assessments().get(wrong.id()).reasons()).contains("RECEIPT_FINGERPRINT_DIFFERS");assertThat(snapshot.assessments().get(missing.id()).reasons()).contains("MISSING_OR_AMBIGUOUS_SUCCESS_HISTORY");
+  for(var b:List.of(wrong,missing))assertThatThrownBy(()->service.checkinByCode(facility,new CodeInput(b.bookingCode()),actor,"token")).isInstanceOf(ConflictException.class).hasMessageContaining("Chưa xác minh đủ thanh toán");
+ }
+ @Test void paymentProofReviewBlocksUsageWhilePreservingVerifiedAppliedMoney(){
+  scopedPermissions();var b=confirmed();repo.jdbc().update("INSERT INTO payment_reconciliation(id,booking_id,payment_id,reason) VALUES(?,?,?,'PAYMENT_PAYLOAD_CONFLICT')",UUID.randomUUID(),b.id(),b.paymentId());
+  var snapshot=appliedCollections.load(List.of(b));assertThat(snapshot.facts()).hasSize(1);assertThat(snapshot.facts().getFirst().verified()).isTrue();assertThat(snapshot.assessments().get(b.id()).amountApplied()).isEqualByComparingTo("150000");assertThat(snapshot.reviewedPaymentIds()).contains(b.paymentId());assertThat(snapshot.assessments().get(b.id()).fullyPaid()).isFalse();
+  when(clock.instant()).thenReturn(start.minusSeconds(60));assertThatThrownBy(()->service.checkinByCode(facility,new CodeInput(b.bookingCode()),counterStaff("BOOKING_CHECK_IN"),"token")).isInstanceOf(ConflictException.class).hasMessageContaining("Chưa xác minh đủ thanh toán");
+ }
+ @Test void paymentProofCancellationKeepsGrossAndTransferUsesOriginalPayer(){
+  var b=demoConfirmed();cancelPolicy(b,user,"Customer cancellation");var snapshot=appliedCollections.load(List.of(repo.find(b.id())));assertThat(snapshot.facts().getFirst().verified()).isTrue();assertThat(snapshot.facts().getFirst().amount()).isEqualByComparingTo("150000");
+  var f=handoffFixture();transfers.command("complete",f.command());var moved=repo.find(f.original().id());var transferred=appliedCollections.load(List.of(moved));
+  assertThat(transferred.assessments().get(moved.id()).fullyPaid()).isTrue();assertThat(transferred.facts().getFirst().payerId()).isEqualTo(user.id());assertThat(moved.currentHolderId()).isEqualTo(f.buyer().id());
+ }
+ @Test void paymentProofPreflightIsReadOnlyPaginatedAndOwnerScoped()throws Exception{
+  var paid=confirmed();var missing=legacyConfirmedProof(false,true,false);court=UUID.randomUUID();((com.fasterxml.jackson.databind.node.ObjectNode)quote).put("courtId",court.toString());var pending=pendingBooking();
+  var before=repo.jdbc().queryForObject("SELECT md5(string_agg(row_to_json(b)::text,'' ORDER BY id)) FROM bookings b",String.class);
+  int history=repo.jdbc().queryForObject("SELECT count(*) FROM booking_history",Integer.class);
+  var page=appliedCollections.preflight(facility,null,1);assertThat(page.items()).hasSize(1);assertThat(page.more()).isTrue();
+  var all=new java.util.ArrayList<LocalAppliedCollections.PreflightItem>(page.items());
+  while(page.more()){page=appliedCollections.preflight(facility,page.nextAfterId(),1);all.addAll(page.items());}
+  assertThat(all).hasSize(3);assertThat(all.stream().filter(i->i.bookingId().equals(paid.id())).findFirst().orElseThrow().fullyPaid()).isTrue();
+  assertThat(all.stream().filter(i->i.bookingId().equals(missing.id())).findFirst().orElseThrow().reconciliationRequired()).isTrue();
+  assertThat(all.stream().filter(i->i.bookingId().equals(pending.id())).findFirst().orElseThrow().reconciliationRequired()).isFalse();
+  assertThat(appliedCollections.preflight(UUID.randomUUID(),null,10).items()).isEmpty();
+  assertThatThrownBy(()->appliedCollections.preflight(facility,null,501)).isInstanceOf(IllegalArgumentException.class);
+  var owner=refundOwner();when(identity.current(any())).thenReturn(owner);
+  http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/bookings/facility/"+facility+"/payment-proof-preflight").header("Authorization","Bearer proof")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
+  doThrow(new ForbiddenException("Outside ownership")).when(dependencies).ownerFacility(facility,owner,"Bearer proof");
+  http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/bookings/facility/"+facility+"/payment-proof-preflight").header("Authorization","Bearer proof")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+  when(identity.current(any())).thenReturn(counterStaff("BOOKING_REFUND"));
+  http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/bookings/facility/"+facility+"/payment-proof-preflight")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+  assertThat(repo.jdbc().queryForObject("SELECT md5(string_agg(row_to_json(b)::text,'' ORDER BY id)) FROM bookings b",String.class)).isEqualTo(before);
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM booking_history",Integer.class)).isEqualTo(history);
+ }
+ Booking legacyRefundBooking(BigDecimal amount){
+  UUID reservation=UUID.randomUUID(),id=UUID.randomUUID();var q=quote.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)q).remove("refundPolicy");
+  repo.jdbc().update("INSERT INTO slot_reservations(id,court_id,facility_id,holder_id,starts_at,ends_at,expires_at,state,quote) VALUES(?,?,?,?,?,?,?,'HOLD',?::jsonb)",reservation,court,facility,user.id(),java.sql.Timestamp.from(start),java.sql.Timestamp.from(end),java.sql.Timestamp.from(now.plusSeconds(600)),repo.write(q));
+  repo.jdbc().update("INSERT INTO bookings(id,reservation_id,facility_id,court_id,created_by,customer_id,current_holder_id,starts_at,ends_at,status,source,amount,currency,price_snapshot,hold_expires_at) VALUES(?,?,?,?,?,?,?,?,?,'PENDING','ONLINE',?,'VND',?::jsonb,?)",id,reservation,facility,court,user.id(),user.id(),user.id(),java.sql.Timestamp.from(start),java.sql.Timestamp.from(end),amount,repo.write(q),java.sql.Timestamp.from(now.plusSeconds(600)));
+  return repo.find(id);
+ }
+ Caller refundOwner(){return new Caller(UUID.randomUUID(),"Owner",Set.of("OWNER"),Map.of());}
+ @Test void legacyRefundAdoptionRequiresOwnerOfferAndCustomerConsentWithoutRewritingOldFacts(){
+  var b=legacyRefundBooking(new BigDecimal("150000"));var original=repo.write(b.priceSnapshot());var owner=refundOwner();
+  assertThat(adoptions.preflight(facility,owner,"token")).extracting(LegacyRefundPolicyAdoption.Candidate::bookingId).contains(b.id());
+  var input=new LegacyRefundPolicyAdoption.Input(b.version(),policy(facility,8000,1).path("termsHash").asText(),"Agreed explicit legacy terms",null);
+  assertThatThrownBy(()->adoptions.propose(b.id(),input,counterStaff("BOOKING_REFUND"),"token")).isInstanceOf(ForbiddenException.class);
+  var offer=adoptions.propose(b.id(),input,owner,"token");assertThat(offer.adopted()).isFalse();
+  assertThatThrownBy(()->adoptions.consent(offer.id(),customer())).isInstanceOf(ForbiddenException.class);
+  assertThat(adoptions.consent(offer.id(),user).adopted()).isTrue();assertThat(adoptions.consent(offer.id(),user).adopted()).isTrue();
+  assertThat(repo.write(repo.find(b.id()).priceSnapshot())).isEqualTo(original);assertThat(repo.find(b.id()).paymentId()).isNull();assertThat(repo.find(b.id()).version()).isEqualTo(b.version());
+  assertThat(repo.history(b.id())).extracting(History::action).containsExactly("REFUND_POLICY_LEGACY_ADOPTED");
+  assertThat(repo.jdbc().queryForObject("SELECT origin FROM booking_refund_policy_snapshots WHERE booking_id=?",String.class,b.id())).isEqualTo("LEGACY_ADOPTION");
+ }
+ @Test void legacyRefundPreflightIsReadOnlyAndFractionalMoneyCannotBeSilentlyRounded(){
+  var b=legacyRefundBooking(new BigDecimal("150000.25"));var owner=refundOwner();
+  var candidates=adoptions.preflight(facility,owner,"token");assertThat(candidates).hasSize(1);assertThat(candidates.getFirst().reasons()).contains("UNSUPPORTED_MONEY_PRECISION_REVIEW");
+  assertThatThrownBy(()->adoptions.propose(b.id(),new LegacyRefundPolicyAdoption.Input(b.version(),policy(facility,8000,1).path("termsHash").asText(),"No rounding allowed",null),owner,"token")).isInstanceOf(ConflictException.class);
+  assertThat(repo.find(b.id()).amount()).isEqualByComparingTo("150000.25");assertThat(repo.history(b.id())).isEmpty();
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM booking_refund_policy_snapshots WHERE booking_id=?",Integer.class,b.id())).isZero();
+ }
+ @Test void legacyRefundAdoptionCannotUseStalePolicyExpiredOfferOrForeignOwner(){
+  var b=legacyRefundBooking(new BigDecimal("150000"));var owner=refundOwner();
+  assertThatThrownBy(()->adoptions.propose(b.id(),new LegacyRefundPolicyAdoption.Input(b.version(),"0".repeat(64),"Stale rate",null),owner,"token")).isInstanceOf(ConflictException.class);
+  var offer=adoptions.propose(b.id(),new LegacyRefundPolicyAdoption.Input(b.version(),policy(facility,8000,1).path("termsHash").asText(),"Reviewed rate",null),owner,"token");
+  when(clock.instant()).thenReturn(now.plusSeconds(901));assertThatThrownBy(()->adoptions.consent(offer.id(),user)).isInstanceOf(ConflictException.class);
+  doThrow(new ForbiddenException("Outside ownership")).when(dependencies).ownerFacility(facility,owner,"token");
+  assertThatThrownBy(()->adoptions.preflight(facility,owner,"token")).isInstanceOf(ForbiddenException.class);
+ }
+ @Test void legacyRefundGroupAdoptionWaitsForAllAffectedMembers(){
+  var b=legacyRefundBooking(new BigDecimal("150000"));var member=customer();
+  new org.springframework.transaction.support.TransactionTemplate(txManager).executeWithoutResult(tx->{
+   repo.jdbc().update("INSERT INTO booking_groups(id,owner_id,name,state,deadline,max_members) VALUES(?,?,?,'GROUP_PENDING',?,2)",b.id(),user.id(),"Legacy group",java.sql.Timestamp.from(b.holdExpiresAt()));
+   for(var person:List.of(user,member))repo.jdbc().update("INSERT INTO group_members(id,group_id,user_id,display_name) VALUES(?,?,?,?)",UUID.randomUUID(),b.id(),person.id(),person.fullName());
+  });
+  var offer=adoptions.propose(b.id(),new LegacyRefundPolicyAdoption.Input(b.version(),policy(facility,8000,1).path("termsHash").asText(),"All members must accept",null),refundOwner(),"token");
+  assertThat(offer.requiredUsers()).containsExactlyInAnyOrder(user.id(),member.id());
+  assertThat(adoptions.consent(offer.id(),user).adopted()).isFalse();assertThat(adoptions.consent(offer.id(),member).adopted()).isTrue();
+ }
+ @Test void legacyRefundWalkInAdoptionRecordsExplicitGuestConsentFromActualOwner(){
+  var staff=counterStaff("BOOKING_CREATE_COUNTER");UUID booking=UUID.randomUUID(),reservation=UUID.randomUUID();
+  new org.springframework.transaction.support.TransactionTemplate(txManager).executeWithoutResult(tx->{
+   repo.jdbc().update("INSERT INTO slot_reservations(id,court_id,facility_id,holder_id,starts_at,ends_at,expires_at,state,quote) VALUES(?,?,?,NULL,?,?,?,'HOLD','{}')",reservation,court,facility,java.sql.Timestamp.from(start),java.sql.Timestamp.from(end),java.sql.Timestamp.from(now.plusSeconds(600)));
+   repo.jdbc().update("INSERT INTO bookings(id,reservation_id,facility_id,court_id,created_by,customer_id,current_holder_id,starts_at,ends_at,status,source,guest_name,guest_phone,amount,currency,price_snapshot,hold_expires_at) VALUES(?,?,?,?,?,NULL,NULL,?,?,'PENDING','OFFLINE_COUNTER','Guest','0901234567',150000,'VND','{}',?)",booking,reservation,facility,court,staff.id(),java.sql.Timestamp.from(start),java.sql.Timestamp.from(end),java.sql.Timestamp.from(now.plusSeconds(600)));
+   repo.jdbc().update("INSERT INTO counter_booking_guests(booking_id,operator_id,guest_name,guest_phone) VALUES(?,?,'Guest','0901234567')",booking,staff.id());
+  });
+  var b=repo.find(booking);var owner=refundOwner();String hash=policy(facility,8000,1).path("termsHash").asText();
+  assertThatThrownBy(()->adoptions.propose(booking,new LegacyRefundPolicyAdoption.Input(b.version(),hash,"Review",null),owner,"token")).isInstanceOf(IllegalArgumentException.class);
+  var offer=adoptions.propose(booking,new LegacyRefundPolicyAdoption.Input(b.version(),hash,"Guest agreed after review","Signed guest receipt fixture-1"),owner,"token");
+  assertThat(offer.adopted()).isTrue();assertThat(offer.requiredUsers()).isEmpty();assertThat(repo.find(booking).currentHolderId()).isNull();
+  assertThat(repo.jdbc().queryForObject("SELECT accepted_by FROM booking_refund_policy_snapshots WHERE booking_id=?",UUID.class,booking)).isEqualTo(owner.id());
+ }
+
+ @Test void refundPolicyUnconfiguredBlocksEveryNewBookingWithoutWritingHolds(){
+  when(dependencies.refundPolicy(any())).thenReturn(json.valueToTree(Map.of("configured",false)));
+  assertThatThrownBy(()->service.hold(input(),key(),user,"token",false)).isInstanceOf(ConflictException.class).hasMessageContaining("Owner");
+  scopedPermissions();var staff=counterStaff("BOOKING_CREATE_COUNTER");
+  assertThatThrownBy(()->service.counter(counterInput(),key(),staff,"token")).isInstanceOf(ConflictException.class);
+  assertThatThrownBy(this::groupInput).isInstanceOf(ConflictException.class);
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM slot_reservations WHERE court_id=?",Integer.class,court)).isZero();
+ }
+ @Test void refundPolicyZeroIsExplicitAndHoldTermsSurviveOwnerChanges(){
+  when(dependencies.refundPolicy(any())).thenReturn(policy(facility,0,1));
+  var h=service.hold(input(),key(),user,"token",false);
+  when(dependencies.refundPolicy(any())).thenReturn(policy(facility,10000,2));
+  var b=service.create(new CreateInput(h.id(),null,null),key(),user,"token",false);
+  assertThat(b.priceSnapshot().path("refundPolicy").path("rateBps").asInt()).isZero();
+  assertThat(repo.jdbc().queryForObject("SELECT refund_rate_bps FROM booking_refund_policy_snapshots WHERE booking_id=?",Integer.class,b.id())).isZero();
+  assertThatThrownBy(()->repo.jdbc().update("UPDATE booking_refund_policy_snapshots SET refund_rate_bps=10000 WHERE booking_id=?",b.id())).isInstanceOf(org.springframework.dao.DataAccessException.class);
+  assertThatThrownBy(()->repo.jdbc().update("DELETE FROM booking_refund_policy_snapshots WHERE booking_id=?",b.id())).isInstanceOf(org.springframework.dao.DataAccessException.class);
+ }
+ @Test void refundPolicyGroupAcceptsTheFrozenHoldAndStoresItsOwnSnapshot(){
+  var input=groupInput();when(dependencies.refundPolicy(any())).thenReturn(policy(facility,5000,2));
+  var g=groups.create(input,key(),user,"token");
+  assertThat(repo.jdbc().queryForObject("SELECT refund_rate_bps FROM booking_refund_policy_snapshots WHERE booking_id=?",Integer.class,g.id())).isEqualTo(8000);
+ }
+ @Test void refundPolicyLegacyHoldCannotBecomeNewBookingOrChangeExistingBookings(){
+  var b=pendingBooking();UUID legacy=UUID.randomUUID();var oldQuote=quote.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)oldQuote).remove("refundPolicy");
+  // Insert a pre-cutover fixture without weakening the reservation immutability trigger.
+  repo.jdbc().update("INSERT INTO slot_reservations(id,court_id,facility_id,holder_id,starts_at,ends_at,expires_at,state,quote) VALUES(?,?,?,?,?,?,?,'HOLD',?::jsonb)",legacy,UUID.randomUUID(),facility,user.id(),java.sql.Timestamp.from(start),java.sql.Timestamp.from(end),java.sql.Timestamp.from(now.plusSeconds(600)),repo.write(oldQuote));
+  assertThatThrownBy(()->service.create(new CreateInput(legacy,null,null),key(),user,"token",false)).isInstanceOf(ConflictException.class).hasMessageContaining("new hold");
+  assertThat(repo.find(b.id()).status()).isEqualTo("PENDING");
+ }
+ @Test void refundPolicyCounterRequiresReviewedHashAndRollsBackOnMismatch(){
+  scopedPermissions();var staff=counterStaff("BOOKING_CREATE_COUNTER");var i=counterInput();
+  for(String hash:Arrays.asList(null,"0".repeat(64))){
+   var invalid=new CounterInput(i.courtId(),i.startsAt(),i.endsAt(),i.expectedAmount(),i.guestName(),i.guestPhone(),i.paymentMethod(),hash);
+   assertThatThrownBy(()->service.counter(invalid,key(),staff,"token")).isInstanceOf(ConflictException.class).hasMessageContaining("Refund policy changed");
+  }
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM slot_reservations WHERE court_id=?",Integer.class,court)).isZero();
+  String request=key();var b=service.counter(i,request,staff,"token");
+  when(dependencies.refundPolicy(any())).thenReturn(json.valueToTree(Map.of("configured",false)));
+  assertThat(service.counter(i,request,staff,"token").id()).isEqualTo(b.id());
+  assertThat(b.customerId()).isNull();assertThat(b.currentHolderId()).isNull();
+ }
+ @Test void refundPolicyUnavailableOrWrongFacilityHashFailsClosed(){
+  when(dependencies.refundPolicy(any())).thenReturn(null);
+  assertThatThrownBy(()->service.hold(input(),key(),user,"token",false)).isInstanceOf(org.springframework.web.server.ResponseStatusException.class).hasMessageContaining("503");
+  when(dependencies.refundPolicy(any())).thenReturn(policy(UUID.randomUUID(),8000,1));
+  assertThatThrownBy(()->service.hold(input(),key(),user,"token",false)).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+ }
 
  @Test void discoveryUsesRealReservationExclusionsAndPublicSummaries() {
   UUID category=UUID.randomUUID();String day=now.atZone(ZoneId.of("Asia/Ho_Chi_Minh")).toLocalDate().toString();
@@ -98,6 +264,40 @@ class BookingIntegrationTest {
   assertThat(repo.history(id).stream().filter(x->x.action().equals("TRANSFER_COMPLETED"))).hasSize(1);assertThat(service.checkin(id,new CheckinInput(service.detail(id,buyer,"token").checkinToken()),staff,"token").status()).isEqualTo("CHECKED_IN");
  }
  record HandoffFixture(Booking original,Caller buyer,UUID listing,TransferLeaseService.Command command){}
+ @Test void acquisitionAbortFencesOldCompleteAndRelockWhileListingCanServeAnotherBuyer(){
+  var f=handoffFixture();var c=f.command();var proof=transfers.abort(c,"Verified technical handoff cancellation");
+  assertThat(proof.get("decision")).isEqualTo("ABORTED");assertThat(transfers.abort(c,"Replay").get("commandFingerprint")).isEqualTo(proof.get("commandFingerprint"));
+  assertThat(repo.find(c.bookingId()).currentHolderId()).isEqualTo(user.id());
+  assertThatThrownBy(()->transfers.command("complete",c)).isInstanceOf(ConflictException.class).hasMessageContaining("aborted");
+  assertThatThrownBy(()->transfers.command("lock",c)).isInstanceOf(ConflictException.class);
+  var next=new TransferLeaseService.Command(c.listingId(),c.bookingId(),c.sellerId(),c.price(),c.deadline(),UUID.randomUUID(),customer().id(),c.expiresAt(),null,null,c.currency());
+  transfers.command("lock",next);assertThat(transfers.receipt(c.listingId()).get("acquisitionId")).isEqualTo(next.acquisitionId());
+  assertThatThrownBy(()->transfers.command("complete",c)).isInstanceOf(ConflictException.class);assertThat(transfers.decision(c.acquisitionId()).get("decision")).isEqualTo("ABORTED");
+ }
+ @Test void acquisitionCompleteWinsLaterAbortAndKeepsItsOriginalProof(){
+  var f=handoffFixture();transfers.command("complete",f.command());var proof=transfers.abort(f.command(),"Lost response must not refund");
+  assertThat(proof.get("decision")).isEqualTo("COMPLETED");assertThat(proof.get("commandFingerprint")).isEqualTo(transfers.receipt(f.listing()).get("commandFingerprint"));
+  assertThat(repo.find(f.original().id()).currentHolderId()).isEqualTo(f.buyer().id());
+  assertThatThrownBy(()->repo.jdbc().update("UPDATE transfer_acquisition_decisions SET decision='ABORTED' WHERE acquisition_id=?",f.command().acquisitionId())).isInstanceOf(org.springframework.dao.DataAccessException.class);
+ }
+ @Test void acquisitionCompleteCapturesOneDecisionTimeEvenWhenTheClockAdvances(){
+  var f=handoffFixture();var ticks=new java.util.concurrent.atomic.AtomicLong();
+  when(clock.instant()).thenAnswer(a->start.minusSeconds(600).plusNanos(ticks.incrementAndGet()*1000));
+  transfers.command("complete",f.command());
+  assertThat(repo.jdbc().queryForObject("SELECT h.transferred_at=d.decided_at FROM transfer_handoffs h JOIN transfer_acquisition_decisions d USING(acquisition_id) WHERE h.acquisition_id=?",Boolean.class,f.command().acquisitionId())).isTrue();
+ }
+ @Test void acquisitionCompleteAndAbortRaceHasExactlyOneTerminalDecision()throws Exception{
+  var f=handoffFixture();var go=new CountDownLatch(1);
+  try(var pool=Executors.newFixedThreadPool(2)){
+   var complete=pool.submit(()->{go.await();try{transfers.command("complete",f.command());return true;}catch(ConflictException ex){return false;}});
+   var abort=pool.submit(()->{go.await();return transfers.abort(f.command(),"Concurrent abort");});go.countDown();
+   boolean handed=complete.get(20,TimeUnit.SECONDS);var proof=abort.get(20,TimeUnit.SECONDS);
+   assertThat(proof.get("decision")).isEqualTo(handed?"COMPLETED":"ABORTED");
+   assertThat(repo.find(f.original().id()).currentHolderId()).isEqualTo(handed?f.buyer().id():user.id());
+   assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM transfer_handoffs WHERE acquisition_id=?",Integer.class,f.command().acquisitionId())).isEqualTo(handed?1:0);
+  }
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM transfer_acquisition_decisions WHERE acquisition_id=?",Integer.class,f.command().acquisitionId())).isEqualTo(1);
+ }
  HandoffFixture handoffFixture(){
   court=UUID.randomUUID();((com.fasterxml.jackson.databind.node.ObjectNode)quote).put("courtId",court.toString());var b=pendingBooking();consumer.apply(success(b,UUID.randomUUID()));b=repo.find(b.id());var buyer=customer();UUID listing=UUID.randomUUID(),acquisition=UUID.randomUUID();Instant expires=now.plusSeconds(600);
   transfers.command("register",new TransferLeaseService.Command(listing,b.id(),user.id(),new BigDecimal("100000"),start,null,null,null,null,null,"VND"));
@@ -165,7 +365,7 @@ class BookingIntegrationTest {
   consumer.apply(success(b,UUID.randomUUID()));assertThat(repo.find(b.id()).status()).isEqualTo("EXPIRED");assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM payment_reconciliation WHERE booking_id=?",Integer.class,b.id())).isEqualTo(1);
  }
  @Test void ownershipAndPriceChangeAreRejected(){
-  var h=service.hold(input(),key(),user,"token",false);assertThatThrownBy(()->service.ownHold(h.id(),customer())).isInstanceOf(ForbiddenException.class);
+  var h=service.hold(input(),key(),user,"token",false);assertThatThrownBy(()->service.ownHold(h.id(),customer(),"token")).isInstanceOf(ForbiddenException.class);
   var changed=quote.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)changed).put("amount",200000);when(dependencies.quote(any())).thenReturn(changed);
   assertThatThrownBy(()->service.create(new CreateInput(h.id(),null,null),key(),user,"token",false)).isInstanceOf(ConflictException.class);
   assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM bookings WHERE reservation_id=?",Integer.class,h.id())).isZero();
@@ -210,7 +410,7 @@ class BookingIntegrationTest {
  @Test void fractionalGroupPriceIsRejectedWithoutRoundingOrPartialCreation(){
   var input=groupInput();((com.fasterxml.jackson.databind.node.ObjectNode)quote).put("amount",new BigDecimal("150000.25"));
   // A fresh fractional hold is legitimate for individual booking, but cannot be split into integer dong.
-  service.releaseHold(input.holdId(),user);var hold=service.hold(new HoldInput(court,start,end,new BigDecimal("150000.25")),key(),user,"token",false);String requestKey=key();
+  service.releaseHold(input.holdId(),user,"token");var hold=service.hold(new HoldInput(court,start,end,new BigDecimal("150000.25")),key(),user,"token",false);String requestKey=key();
   assertThatThrownBy(()->groups.create(new CreateGroup(hold.id(),"Fractional",10),requestKey,user,"token")).isInstanceOf(ConflictException.class).hasMessageContaining("cannot be rounded");
   assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM bookings WHERE reservation_id=?",Integer.class,hold.id())).isZero();
   assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM request_idempotency WHERE actor_id=? AND operation='GROUP' AND key=?",Integer.class,user.id(),requestKey)).isZero();
@@ -226,7 +426,7 @@ class BookingIntegrationTest {
   assertThatThrownBy(()->groups.create(new CreateGroup(input.holdId(),"Changed",10),requestKey,user,"token")).isInstanceOf(ConflictException.class);
  }
  @Test void groupMinimumLeadIsRevalidatedAfterQuoteAndRollsBack(){
-  var initial=groupInput();service.releaseHold(initial.holdId(),user);start=now.plusSeconds(7201);end=start.plusSeconds(3600);((com.fasterxml.jackson.databind.node.ObjectNode)quote).put("startsAt",start.toString()).put("endsAt",end.toString());
+  var initial=groupInput();service.releaseHold(initial.holdId(),user,"token");start=now.plusSeconds(7201);end=start.plusSeconds(3600);((com.fasterxml.jackson.databind.node.ObjectNode)quote).put("startsAt",start.toString()).put("endsAt",end.toString());
   var hold=service.hold(input(),key(),user,"token",false);var input=new CreateGroup(hold.id(),"Lead time",10);
   doAnswer(i->{when(clock.instant()).thenReturn(now.plusSeconds(2));return quote;}).when(dependencies).quote(any());
   assertThatThrownBy(()->groups.create(input,key(),user,"token")).isInstanceOf(ConflictException.class);
@@ -523,9 +723,12 @@ class BookingIntegrationTest {
   var counterPayment=(com.fasterxml.jackson.databind.node.ObjectNode)success(b,UUID.randomUUID());((com.fasterxml.jackson.databind.node.ObjectNode)counterPayment.path("payload")).put("payerId",staffId.toString());consumer.apply(counterPayment);
   var reader=new Caller(staffId,"Reader",Set.of("STAFF"),Map.of(facility,Set.of("BOOKING_READ")));
   assertThat(service.detail(b.id(),reader,"token").checkinToken()).isNull();
-  assertThat(service.detail(b.id(),staff,"token").checkinToken()).isNotNull();
-  assertThat(transfers.inspect(b.id()).path("transferBlockedReason").asText()).contains("counter operator");
-  var buyer=customer();repo.jdbc().update("UPDATE bookings SET current_holder_id=?,customer_id=? WHERE id=?",buyer.id(),buyer.id(),b.id());
+  assertThat(service.detail(b.id(),staff,"token").checkinToken()).isNull();
+  assertThat(transfers.inspect(b.id()).path("transferBlockedReason").asText()).contains("Guest walk-in bookings cannot be transferred");
+  var buyer=customer();new org.springframework.transaction.support.TransactionTemplate(txManager).executeWithoutResult(tx->{
+   repo.jdbc().update("UPDATE slot_reservations SET holder_id=? WHERE id=(SELECT reservation_id FROM bookings WHERE id=?)",buyer.id(),b.id());
+   repo.jdbc().update("UPDATE bookings SET current_holder_id=?,customer_id=? WHERE id=?",buyer.id(),buyer.id(),b.id());
+  });
   var buyerView=service.detail(b.id(),buyer,"token");assertThat(buyerView.checkinToken()).isNotNull();assertThat(buyerView.booking().guestPhone()).isNull();assertThat(buyerView.booking().guestName()).isNull();
   assertThat(service.mine(buyer,"token")).filteredOn(v->v.id().equals(b.id())).allMatch(v->v.guestPhone()==null);
 
@@ -536,7 +739,7 @@ class BookingIntegrationTest {
   var hold=service.hold(input(),key(),user,"token",false);var booking=service.create(new CreateInput(hold.id(),null,null),key(),user,"token",false);
   var outsider=customer();assertThatThrownBy(()->service.detail(booking.id(),outsider,"token")).isInstanceOf(ForbiddenException.class);
   assertThatThrownBy(()->service.payable(booking.id(),outsider,"token")).isInstanceOf(ForbiddenException.class);
-  assertThatThrownBy(()->service.ownHold(hold.id(),outsider)).isInstanceOf(ForbiddenException.class);
+  assertThatThrownBy(()->service.ownHold(hold.id(),outsider,"token")).isInstanceOf(ForbiddenException.class);
   var g=reminderGroup(customer());var facilityOwner=new Caller(UUID.randomUUID(),"Facility Owner",Set.of("OWNER"),Map.of());
   assertThatThrownBy(()->groups.invite(g.id(),facilityOwner)).isInstanceOf(ForbiddenException.class);
   assertThatThrownBy(()->groups.detail(g.id(),outsider)).isInstanceOf(ForbiddenException.class);
@@ -656,7 +859,7 @@ class BookingIntegrationTest {
   start=now.plusSeconds(10800);end=start.plusSeconds(3600);((com.fasterxml.jackson.databind.node.ObjectNode)quote).put("startsAt",start.toString()).put("endsAt",end.toString());
   var hold=service.hold(input(),key(),user,"token",false);((com.fasterxml.jackson.databind.node.ObjectNode)quote).put("amount",new BigDecimal("160000"));when(dependencies.quote(any())).thenReturn(quote);
   assertThatThrownBy(()->groups.create(new CreateGroup(hold.id(),"Group",5),key(),user,"token")).isInstanceOf(ConflictException.class);
-  ((com.fasterxml.jackson.databind.node.ObjectNode)quote).put("amount",150000);service.releaseHold(hold.id(),user);var operator=new Caller(UUID.randomUUID(),"Staff",Set.of("STAFF"),Map.of(facility,Set.of("BOOKING_CREATE_COUNTER")));var counter=service.hold(input(),key(),operator,"token",true);
+  ((com.fasterxml.jackson.databind.node.ObjectNode)quote).put("amount",150000);service.releaseHold(hold.id(),user,"token");var operator=new Caller(UUID.randomUUID(),"Staff",Set.of("STAFF"),Map.of(facility,Set.of("BOOKING_CREATE_COUNTER")));var counter=service.hold(input(),key(),operator,"token",true);
   ((com.fasterxml.jackson.databind.node.ObjectNode)quote).put("amount",new BigDecimal("160000"));assertThatThrownBy(()->service.create(new CreateInput(counter.id(),"Guest","0901234567"),key(),operator,"token",true)).isInstanceOf(ConflictException.class);
  }
  @Test void bookingSnapshotAndAmountCannotBeUpdatedDirectlyAndDecimalJsonRemainsExact()throws Exception{
@@ -733,11 +936,12 @@ class BookingIntegrationTest {
   var adjacent=service.hold(new HoldInput(court,end,end.plusSeconds(3600),new BigDecimal("150000")),key(),other,"token",false);assertThat(adjacent.state()).isEqualTo("HOLD");
  }
  @Test void releaseIsIdempotentAuditedAndCannotReleaseABookingReservation(){
-  String request=key();var h=service.hold(input(),request,user,"token",false);service.releaseHold(h.id(),user);service.releaseHold(h.id(),user);
+  scopedPermissions();
+  String request=key();var h=service.hold(input(),request,user,"token",false);service.releaseHold(h.id(),user,"token");service.releaseHold(h.id(),user,"token");
   assertThat(repo.hold(h.id()).state()).isEqualTo("RELEASED");assertThat(service.hold(input(),request,user,"token",false).id()).isEqualTo(h.id());assertThat(repo.hold(h.id()).state()).isEqualTo("RELEASED");
   assertThat(repo.jdbc().queryForList("SELECT state FROM reservation_history WHERE reservation_id=? ORDER BY id",String.class,h.id())).containsExactly("HOLD","RELEASED");
   var next=service.hold(input(),key(),user,"token",false);var b=service.create(new CreateInput(next.id(),null,null),key(),user,"token",false);
-  assertThatThrownBy(()->service.releaseHold(next.id(),user)).isInstanceOf(ConflictException.class);assertThatThrownBy(()->service.releaseHold(next.id(),customer())).isInstanceOf(ForbiddenException.class);
+  assertThatThrownBy(()->service.releaseHold(next.id(),user,"token")).isInstanceOf(ConflictException.class);assertThatThrownBy(()->service.releaseHold(next.id(),customer(),"token")).isInstanceOf(ForbiddenException.class);
   service.cancel(b.id(),new CancelInput("Changed plan"),user,"token");assertThat(repo.hold(next.id()).state()).isEqualTo("RELEASED");
  }
  @Test void databaseRejectsScopeMutationInvalidTransitionsAndUnpairedConfirmation(){
@@ -753,7 +957,7 @@ class BookingIntegrationTest {
  @Test void reservationAuditIsImmutableAndStateChangeRollbackDoesNotLeaveHistory(){
   var h=service.hold(input(),key(),user,"token",false);
   assertThatThrownBy(()->repo.jdbc().update("UPDATE reservation_history SET state='BOOKED' WHERE reservation_id=?",h.id())).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
-  new org.springframework.transaction.support.TransactionTemplate(txManager).executeWithoutResult(tx->{service.releaseHold(h.id(),user);tx.setRollbackOnly();});
+  new org.springframework.transaction.support.TransactionTemplate(txManager).executeWithoutResult(tx->{service.releaseHold(h.id(),user,"token");tx.setRollbackOnly();});
   assertThat(repo.hold(h.id()).state()).isEqualTo("HOLD");assertThat(repo.jdbc().queryForList("SELECT state FROM reservation_history WHERE reservation_id=?",String.class,h.id())).containsExactly("HOLD");
  }
  @Test void expiryAndPaymentAtDeadlineCannotResurrectOrDoubleBook()throws Exception{
@@ -851,13 +1055,13 @@ class BookingIntegrationTest {
  @Autowired OperationalReconciliationService reconciliation;
  Caller counterStaff(String... permissions){return new Caller(UUID.randomUUID(),"Counter Staff",Set.of("STAFF"),Map.of(facility,Set.of(permissions)));}
  void scopedPermissions(){var real=new BookingDependencies("http://unused.invalid","http://unused.invalid");doAnswer(a->{if(a.<Caller>getArgument(1).hasRole("OWNER"))return null;real.facilityPermission(a.getArgument(0),a.getArgument(1),a.getArgument(2),a.getArgument(3));return null;}).when(dependencies).facilityPermission(any(),any(),any(),any());}
- CounterInput counterInput(){return new CounterInput(court,start,end,new BigDecimal("150000"),"Khách tại quầy","0901234567","DEMO");}
+ CounterInput counterInput(){return new CounterInput(court,start,end,new BigDecimal("150000"),"Khách tại quầy","0901234567","DEMO",policy(facility,8000,1).path("termsHash").asText());}
  Booking counterBooking(Caller operator){return service.counter(counterInput(),key(),operator,"token");}
  JsonNode counterSuccess(Booking b,UUID payer,UUID payment){var event=(com.fasterxml.jackson.databind.node.ObjectNode)success(b,payment);((com.fasterxml.jackson.databind.node.ObjectNode)event.path("payload")).put("payerId",payer.toString());return event;}
  Booking confirmed(){var b=pendingBooking();consumer.apply(success(b,UUID.randomUUID()));return repo.find(b.id());}
 
  @Test void counterWalkInHasImmutableGuestOperatorSourceCodeAndBackendSnapshot(){
-  scopedPermissions();var actor=counterStaff("BOOKING_CREATE_COUNTER","BOOKING_READ");var b=counterBooking(actor);assertThat(b.status()).isEqualTo("PENDING");assertThat(b.source()).isEqualTo("OFFLINE_COUNTER");assertThat(b.createdBy()).isEqualTo(actor.id());assertThat(b.bookingCode()).matches("[0-9A-F]{10}");assertThat(b.priceSnapshot()).isEqualTo(quote);assertThat(b.paymentId()).isNull();var guest=operations.operations(b.id(),actor,"token").counterGuest();assertThat(guest.operatorId()).isEqualTo(actor.id());assertThat(guest.linkedCustomerId()).isNull();assertThat(guest.paymentCapability()).isEqualTo("DEMO_ONLY");
+  scopedPermissions();var actor=counterStaff("BOOKING_CREATE_COUNTER","BOOKING_READ");var b=counterBooking(actor);assertThat(b.status()).isEqualTo("PENDING");assertThat(b.source()).isEqualTo("OFFLINE_COUNTER");assertThat(b.createdBy()).isEqualTo(actor.id());assertThat(b.bookingCode()).matches("[0-9A-F]{10}");assertThat(b.priceSnapshot()).isEqualTo(repo.read(repo.write(quote)));assertThat(b.paymentId()).isNull();var guest=operations.operations(b.id(),actor,"token").counterGuest();assertThat(guest.operatorId()).isEqualTo(actor.id());assertThat(guest.linkedCustomerId()).isNull();assertThat(guest.paymentCapability()).isEqualTo("DEMO_ONLY");
   assertThatThrownBy(()->repo.jdbc().update("UPDATE counter_booking_guests SET guest_phone='0909999999' WHERE booking_id=?",b.id())).isInstanceOf(org.springframework.dao.DataAccessException.class);assertThatThrownBy(()->repo.jdbc().update("UPDATE bookings SET booking_code='FFFFFFFFFF' WHERE id=?",b.id())).isInstanceOf(org.springframework.dao.DataAccessException.class);
  }
  @Test void counterAutomaticallyLinksVerifiedCustomerAndBothAuthorizedPayersUseOneSnapshot(){
@@ -885,11 +1089,18 @@ class BookingIntegrationTest {
  @Test void concurrentCounterRetriesCreateExactlyOneBookingAndOneGuest()throws Exception{
   scopedPermissions();var actor=counterStaff("BOOKING_CREATE_COUNTER");String request=key();try(var pool=Executors.newFixedThreadPool(2)){var go=new CountDownLatch(1);var a=pool.submit(()->{go.await();return service.counter(counterInput(),request,actor,"token").id();});var b=pool.submit(()->{go.await();return service.counter(counterInput(),request,actor,"token").id();});go.countDown();assertThat(a.get(10,TimeUnit.SECONDS)).isEqualTo(b.get(10,TimeUnit.SECONDS));}assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM bookings WHERE court_id=?",Integer.class,court)).isEqualTo(1);assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM counter_booking_guests g JOIN bookings b ON b.id=g.booking_id WHERE b.court_id=?",Integer.class,court)).isEqualTo(1);
  }
- @Test void paidCustomerCancellationHasZeroRefundPreservesMoneyAndReleasesSlot(){
-  var b=confirmed();var result=service.cancel(b.id(),new CancelInput("Cannot attend"),user,"token");assertThat(result.status()).isEqualTo("CANCELLED");assertThat(result.paymentId()).isEqualTo(b.paymentId());assertThat(result.paidAt()).isEqualTo(b.paidAt());assertThat(result.priceSnapshot()).isEqualTo(b.priceSnapshot());assertThat(result.checkinTokenVersion()).isGreaterThan(b.checkinTokenVersion());var event=repo.history(b.id()).stream().filter(h->h.action().equals("CANCELLED")).findFirst().orElseThrow();assertThat(event.details().path("cancellationPolicy").asText()).isEqualTo("CUSTOMER_SELF_NO_REFUND");assertThat(event.details().path("refundAmount").decimalValue()).isEqualByComparingTo("0");assertThat(event.details().path("previousStatus").asText()).isEqualTo("CONFIRMED");assertThat(service.hold(input(),key(),customer(),"token",false).state()).isEqualTo("HOLD");int history=repo.history(b.id()).size();assertThat(service.cancel(b.id(),new CancelInput("Retry"),user,"token").status()).isEqualTo("CANCELLED");assertThat(repo.history(b.id())).hasSize(history);
+
+ @Test void paidCustomerCancellationUsesAcceptedPolicyPreservesMoneyAndReleasesSlot(){
+  var b=demoConfirmed();var q=policyCancellation.quote(b.id(),user,"token");var input=new BookingPolicyCancellation.Input((UUID)q.get("id"),"Cannot attend");String request=key();
+  policyCancellation.cancel(b.id(),input,request,user,"token");var result=repo.find(b.id());
+  assertThat(result.status()).isEqualTo("CANCELLED");assertThat(result.paymentId()).isEqualTo(b.paymentId());assertThat(result.paidAt()).isEqualTo(b.paidAt());assertThat(result.priceSnapshot()).isEqualTo(b.priceSnapshot());assertThat(result.checkinTokenVersion()).isGreaterThan(b.checkinTokenVersion());
+  var event=repo.history(b.id()).stream().filter(h->h.action().equals("CANCELLED")).findFirst().orElseThrow();assertThat(event.details().path("cancellationPolicy").asText()).isEqualTo("FACILITY_POLICY_CANCELLATION");assertThat(event.details().path("refundAmount").decimalValue()).isEqualByComparingTo("120000");assertThat(event.details().path("previousStatus").asText()).isEqualTo("CONFIRMED");
+  assertThat(service.hold(input(),key(),customer(),"token",false).state()).isEqualTo("HOLD");int history=repo.history(b.id()).size();policyCancellation.cancel(b.id(),input,request,user,"token");assertThat(repo.history(b.id())).hasSize(history);
  }
- @Test void paidCancellationNeverAppliesSupplementaryTwentyFourHourRefundTiers(){
-  now=start.minusSeconds(48*3600);when(clock.instant()).thenReturn(now);var b=confirmed();assertThat(b.status()).isEqualTo("CONFIRMED");service.cancel(b.id(),new CancelInput("Early cancellation"),user,"token");assertThat(repo.history(b.id()).getLast().details().path("refundAmount").decimalValue()).isEqualByComparingTo("0");assertThat(repo.history(b.id()).getLast().details().path("cancellationPolicy").asText()).isEqualTo("CUSTOMER_SELF_NO_REFUND");
+
+ @Test void paidCancellationUsesOwnerSnapshotRatherThanSupplementaryTwentyFourHourRefundTiers(){
+  now=start.minusSeconds(48*3600);when(clock.instant()).thenReturn(now);var b=demoConfirmed();cancelPolicy(b,user,"Early cancellation");
+  assertThat(repo.history(b.id()).getLast().details().path("refundAmount").decimalValue()).isEqualByComparingTo("120000");assertThat(repo.history(b.id()).getLast().details().path("cancellationPolicy").asText()).isEqualTo("FACILITY_POLICY_CANCELLATION");
  }
  @Test void cancellationRejectsAnotherCustomerStartedCheckedInAndUnresolvedTransfers(){
   scopedPermissions();var b=confirmed();assertThatThrownBy(()->service.cancel(b.id(),new CancelInput("Foreign"),customer(),"token")).isInstanceOf(ForbiddenException.class);var listing=UUID.randomUUID();var command=new TransferLeaseService.Command(listing,b.id(),user.id(),new BigDecimal("100000"),start,null,null,null,null,null,null);transfers.command("register",command);assertThatThrownBy(()->service.cancel(b.id(),new CancelInput("Listed"),user,"token")).isInstanceOf(ConflictException.class);transfers.command("withdraw",command);when(clock.instant()).thenReturn(start);assertThatThrownBy(()->service.cancel(b.id(),new CancelInput("Started"),user,"token")).isInstanceOf(ConflictException.class);
@@ -898,7 +1109,7 @@ class BookingIntegrationTest {
   var b=confirmed();UUID listing=UUID.randomUUID(),acquisition=UUID.randomUUID();var offer=new TransferLeaseService.Command(listing,b.id(),user.id(),new BigDecimal("100000"),start,null,null,null,null,null,null);transfers.command("register",offer);transfers.command("lock",new TransferLeaseService.Command(listing,b.id(),user.id(),offer.price(),start,acquisition,customer().id(),now.plusSeconds(30),null,null,null));when(clock.instant()).thenReturn(start.minusSeconds(60));assertThatThrownBy(()->service.cancel(b.id(),new CancelInput("Unresolved transfer"),user,"token")).isInstanceOf(ConflictException.class);var staff=counterStaff("BOOKING_CHECK_IN");assertThatThrownBy(()->service.checkinByCode(facility,new CodeInput(b.bookingCode()),staff,"token")).isInstanceOf(ConflictException.class);
  }
  @Test void facilityMayCancelOnlyPendingAndStaffRequiresDedicatedPermission(){
-  scopedPermissions();var b=pendingBooking();var reader=counterStaff("BOOKING_READ");assertThatThrownBy(()->service.cancel(b.id(),new CancelInput("Closure"),reader,"token")).isInstanceOf(ForbiddenException.class);var staff=counterStaff("BOOKING_CANCEL_PENDING");assertThat(service.cancel(b.id(),new CancelInput("Court incident"),staff,"token").status()).isEqualTo("CANCELLED");var next=confirmed();assertThatThrownBy(()->service.cancel(next.id(),new CancelInput("Paid facility cancellation"),staff,"token")).isInstanceOf(ConflictException.class).hasMessageContaining("100%");assertThat(repo.find(next.id()).status()).isEqualTo("CONFIRMED");
+  scopedPermissions();var b=pendingBooking();var reader=counterStaff("BOOKING_READ");assertThatThrownBy(()->service.cancel(b.id(),new CancelInput("Closure"),reader,"token")).isInstanceOf(ForbiddenException.class);var staff=counterStaff("BOOKING_CANCEL_PENDING");assertThat(service.cancel(b.id(),new CancelInput("Court incident"),staff,"token").status()).isEqualTo("CANCELLED");var next=confirmed();assertThatThrownBy(()->service.cancel(next.id(),new CancelInput("Paid facility cancellation"),staff,"token")).isInstanceOf(ConflictException.class).hasMessageContaining("cancel-with-policy");assertThat(repo.find(next.id()).status()).isEqualTo("CONFIRMED");
  }
  @Test void counterGuardianCannotUseCustomerNoRefundPolicyAgainstPaidWalkInBooking(){
   scopedPermissions();var staff=counterStaff("BOOKING_CREATE_COUNTER");var b=counterBooking(staff);consumer.apply(counterSuccess(b,staff.id(),UUID.randomUUID()));assertThatThrownBy(()->service.cancel(b.id(),new CancelInput("Operator cancellation"),staff,"token")).isInstanceOf(ConflictException.class);assertThat(repo.find(b.id()).status()).isEqualTo("CONFIRMED");
@@ -906,8 +1117,11 @@ class BookingIntegrationTest {
  @Test void cancellationRacingCheckinHasOneLegalStateAndOneAuditTransition()throws Exception{
   scopedPermissions();var b=confirmed();when(clock.instant()).thenReturn(start.minusSeconds(60));var staff=counterStaff("BOOKING_CHECK_IN");String qr=service.detail(b.id(),user,"token").checkinToken();try(var pool=Executors.newFixedThreadPool(2)){var go=new CountDownLatch(1);var cancel=pool.submit(()->{go.await();try{service.cancel(b.id(),new CancelInput("Race"),user,"token");return true;}catch(ConflictException denied){return false;}});var check=pool.submit(()->{go.await();try{service.checkin(b.id(),new CheckinInput(qr),staff,"token");return true;}catch(ConflictException denied){return false;}});go.countDown();assertThat(List.of(cancel.get(10,TimeUnit.SECONDS),check.get(10,TimeUnit.SECONDS))).containsExactlyInAnyOrder(true,false);}assertThat(repo.find(b.id()).status()).isIn("CANCELLED","CHECKED_IN");assertThat(repo.history(b.id()).stream().filter(h->Set.of("CANCELLED","CHECKED_IN").contains(h.action())).count()).isEqualTo(1);
  }
- @Test void cancellationFailureRollsBackReservationTokenVersionAndStateAudit(){
-  var b=confirmed();String name="fault_"+UUID.randomUUID().toString().replace("-","");fault("CANCELLED",name);try{assertThatThrownBy(()->service.cancel(b.id(),new CancelInput("Audit outage"),user,"token")).isInstanceOf(org.springframework.dao.DataAccessException.class);}finally{unfault(name);}assertThat(repo.find(b.id()).status()).isEqualTo("CONFIRMED");assertThat(repo.find(b.id()).checkinTokenVersion()).isEqualTo(b.checkinTokenVersion());assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM booking_status_audit WHERE booking_id=? AND status='CANCELLED'",Integer.class,b.id())).isZero();service.cancel(b.id(),new CancelInput("Retry"),user,"token");
+
+ @Test void cancellationFailureRollsBackReservationTokenVersionStateAuditAndEntitlement(){
+  var b=demoConfirmed();var q=policyCancellation.quote(b.id(),user,"token");var input=new BookingPolicyCancellation.Input((UUID)q.get("id"),"Audit outage");String name="fault_"+UUID.randomUUID().toString().replace("-","");fault("CANCELLED",name);
+  try{assertThatThrownBy(()->policyCancellation.cancel(b.id(),input,key(),user,"token")).isInstanceOf(org.springframework.dao.DataAccessException.class);}finally{unfault(name);}
+  assertThat(repo.find(b.id()).status()).isEqualTo("CONFIRMED");assertThat(repo.find(b.id()).checkinTokenVersion()).isEqualTo(b.checkinTokenVersion());assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM booking_status_audit WHERE booking_id=? AND status='CANCELLED'",Integer.class,b.id())).isZero();assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM demo_refund_requests WHERE booking_id=?",Integer.class,b.id())).isZero();policyCancellation.cancel(b.id(),input,key(),user,"token");
  }
  @Test void cancelledPendingPaymentCallbackIsReviewedWithoutResurrectingBooking(){
   var b=pendingBooking();service.cancel(b.id(),new CancelInput("Cancel before callback"),user,"token");consumer.apply(success(b,UUID.randomUUID()));assertThat(repo.find(b.id()).status()).isEqualTo("CANCELLED");assertThat(repo.jdbc().queryForObject("SELECT reason FROM payment_reconciliation WHERE booking_id=?",String.class,b.id())).isEqualTo("BOOKING_NOT_PENDING");
@@ -916,7 +1130,7 @@ class BookingIntegrationTest {
   scopedPermissions();var b=confirmed();var staff=counterStaff("BOOKING_CHECK_IN","BOOKING_COMPLETE");assertThatThrownBy(()->service.checkinByCode(facility,new CodeInput(b.bookingCode()),staff,"token")).isInstanceOf(ConflictException.class);when(clock.instant()).thenReturn(start.minusSeconds(1800));assertThat(service.checkinByCode(facility,new CodeInput(b.bookingCode().toLowerCase(Locale.ROOT)),staff,"token").status()).isEqualTo("CHECKED_IN");assertThatThrownBy(()->service.checkinByCode(facility,new CodeInput(b.bookingCode()),staff,"token")).isInstanceOf(ConflictException.class);assertThatThrownBy(()->service.complete(b.id(),staff,"token")).isInstanceOf(ConflictException.class);when(clock.instant()).thenReturn(end);assertThat(service.complete(b.id(),staff,"token").status()).isEqualTo("COMPLETED");assertThatThrownBy(()->service.complete(b.id(),staff,"token")).isInstanceOf(ConflictException.class);assertThat(repo.history(b.id()).stream().filter(h->h.action().equals("CHECKED_IN")).findFirst().orElseThrow().details().path("checkinMethod").asText()).isEqualTo("BOOKING_CODE");
  }
  @Test void cancelledExpiredInvalidAndForeignCodesCannotCheckIn(){
-  scopedPermissions();var b=confirmed();var staff=counterStaff("BOOKING_CHECK_IN");assertThatThrownBy(()->service.checkinByCode(UUID.randomUUID(),new CodeInput(b.bookingCode()),staff,"token")).isInstanceOf(ForbiddenException.class);assertThatThrownBy(()->service.checkinByCode(facility,new CodeInput("FFFFFFFFFF"),staff,"token")).isInstanceOf(ResourceNotFoundException.class);service.cancel(b.id(),new CancelInput("Do not check in"),user,"token");when(clock.instant()).thenReturn(start.minusSeconds(60));assertThatThrownBy(()->service.checkinByCode(facility,new CodeInput(b.bookingCode()),staff,"token")).isInstanceOf(ConflictException.class);
+  scopedPermissions();var b=demoConfirmed();var staff=counterStaff("BOOKING_CHECK_IN");assertThatThrownBy(()->service.checkinByCode(UUID.randomUUID(),new CodeInput(b.bookingCode()),staff,"token")).isInstanceOf(ForbiddenException.class);assertThatThrownBy(()->service.checkinByCode(facility,new CodeInput("FFFFFFFFFF"),staff,"token")).isInstanceOf(ResourceNotFoundException.class);cancelPolicy(b,user,"Do not check in");when(clock.instant()).thenReturn(start.minusSeconds(60));assertThatThrownBy(()->service.checkinByCode(facility,new CodeInput(b.bookingCode()),staff,"token")).isInstanceOf(ConflictException.class);
  }
  @Test void qrTamperingExpirationAndRevokedStaffAreRejectedWithoutTransition(){
   scopedPermissions();var b=confirmed();when(clock.instant()).thenReturn(start.minusSeconds(60));String qr=service.detail(b.id(),user,"token").checkinToken();var staff=counterStaff("BOOKING_CHECK_IN");assertThatThrownBy(()->service.checkin(b.id(),new CheckinInput(qr+"x"),staff,"token")).isInstanceOf(ForbiddenException.class);var revoked=new Caller(staff.id(),"Revoked",Set.of("STAFF"),Map.of());assertThatThrownBy(()->service.checkin(b.id(),new CheckinInput(qr),revoked,"token")).isInstanceOf(ForbiddenException.class);when(clock.instant()).thenReturn(start.plusSeconds(121));assertThatThrownBy(()->service.checkin(b.id(),new CheckinInput(qr),staff,"token")).isInstanceOf(ForbiddenException.class);assertThat(repo.find(b.id()).status()).isEqualTo("CONFIRMED");
@@ -941,8 +1155,11 @@ class BookingIntegrationTest {
   scopedPermissions();var fixture=handoffFixture();String oldCode=fixture.original().bookingCode();String oldQr=service.detail(fixture.original().id(),user,"token").checkinToken();var moved=transfers.command("complete",fixture.command());assertThat(moved.bookingCode()).isNotEqualTo(oldCode);assertThat(moved.priceSnapshot()).isEqualTo(fixture.original().priceSnapshot());assertThat(service.detail(moved.id(),user,"token").booking().bookingCode()).isNull();assertThat(service.mine(user,"token").stream().filter(b->b.id().equals(moved.id())).findFirst().orElseThrow().bookingCode()).isNull();assertThat(operations.search(new Search(null,null,null,null,null,null,null,0,100),user,"token").items().stream().filter(b->b.id().equals(moved.id())).findFirst().orElseThrow().bookingCode()).isNull();var replay=transfers.command("complete",fixture.command());assertThat(replay.bookingCode()).isEqualTo(moved.bookingCode());
   when(clock.instant()).thenReturn(start.minusSeconds(60));var staff=counterStaff("BOOKING_CHECK_IN");assertThatThrownBy(()->service.checkinByCode(facility,new CodeInput(oldCode),staff,"token")).isInstanceOf(ResourceNotFoundException.class);assertThatThrownBy(()->service.checkin(moved.id(),new CheckinInput(oldQr),staff,"token")).isInstanceOf(ForbiddenException.class);assertThat(service.checkinByCode(facility,new CodeInput(moved.bookingCode()),staff,"token").currentHolderId()).isEqualTo(fixture.buyer().id());
  }
+
  @Test void verifiedCustomerWhoAlsoOperatesCounterIsNotMistakenForWalkInGuardian(){
-  scopedPermissions();var original=counterStaff("BOOKING_CREATE_COUNTER");var actor=new Caller(original.id(),"Staff Customer",Set.of("STAFF","CUSTOMER"),original.facilityBindings());when(dependencies.counterCustomer(any(),any(),any())).thenReturn(actor.id());var b=counterBooking(actor);consumer.apply(counterSuccess(b,actor.id(),UUID.randomUUID()));assertThat(transfers.inspect(b.id()).path("transferBlockedReason").asText()).isEmpty();assertThat(service.cancel(b.id(),new CancelInput("Own verified booking"),actor,"token").status()).isEqualTo("CANCELLED");
+  scopedPermissions();var original=counterStaff("BOOKING_CREATE_COUNTER");var actor=new Caller(original.id(),"Staff Customer",Set.of("STAFF","CUSTOMER"),original.facilityBindings());when(dependencies.counterCustomer(any(),any(),any())).thenReturn(actor.id());var b=counterBooking(actor);
+  var event=(com.fasterxml.jackson.databind.node.ObjectNode)counterSuccess(b,actor.id(),UUID.randomUUID());((com.fasterxml.jackson.databind.node.ObjectNode)event.path("payload")).put("provider","DEMO").put("canonical",true);consumer.apply(event);
+  assertThat(transfers.inspect(b.id()).path("transferBlockedReason").asText()).isEmpty();cancelPolicy(b,actor,"Own verified booking");assertThat(repo.find(b.id()).status()).isEqualTo("CANCELLED");
  }
  @Test void linkedCustomerCounterHoldStillCountsAgainstOperatorPendingLimit(){
   scopedPermissions();var actor=counterStaff("BOOKING_CREATE_COUNTER");when(dependencies.counterCustomer(any(),any(),any())).thenReturn(user.id());for(int i=0;i<5;i++){court=UUID.randomUUID();((com.fasterxml.jackson.databind.node.ObjectNode)quote).put("courtId",court.toString());counterBooking(actor);}court=UUID.randomUUID();((com.fasterxml.jackson.databind.node.ObjectNode)quote).put("courtId",court.toString());assertThatThrownBy(()->counterBooking(actor)).isInstanceOf(ConflictException.class).hasMessageContaining("limit");assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM bookings WHERE created_by=? AND status='PENDING'",Integer.class,actor.id())).isEqualTo(5);
@@ -956,19 +1173,19 @@ class BookingIntegrationTest {
   scopedPermissions();String request=key();var hold=service.hold(input(),key(),user,"token",false);var input=new CreateInput(hold.id(),null,null);var b=service.create(input,request,user,"token",false);consumer.apply(success(b,UUID.randomUUID()));var buyer=customer();UUID listing=UUID.randomUUID(),acquisition=UUID.randomUUID();var offer=new TransferLeaseService.Command(listing,b.id(),user.id(),new BigDecimal("100000"),start,null,null,null,null,null,null);transfers.command("register",offer);transfers.command("lock",new TransferLeaseService.Command(listing,b.id(),user.id(),null,null,acquisition,buyer.id(),now.plusSeconds(300),null,null,null));transfers.command("complete",new TransferLeaseService.Command(listing,b.id(),user.id(),offer.price(),start,acquisition,buyer.id(),now.plusSeconds(300),UUID.randomUUID(),now,"VND"));
   assertThat(service.create(input,request,user,"token",false).bookingCode()).isNull();assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM booking_code_registry WHERE booking_id=?",Integer.class,b.id())).isEqualTo(2);assertThatThrownBy(()->repo.jdbc().update("UPDATE booking_code_registry SET code='1111111111' WHERE booking_id=?",b.id())).isInstanceOf(org.springframework.dao.DataAccessException.class);
  }
+
  @Test void formerCounterHolderReadsHistoryWithoutCodeAndVerifiedOperatorAcquisitionIsRealOwnership(){
-  scopedPermissions();var original=counterStaff("BOOKING_CREATE_COUNTER");var staff=new Caller(original.id(),"Staff Customer",Set.of("STAFF","CUSTOMER"),original.facilityBindings());when(dependencies.counterCustomer(any(),any(),any())).thenReturn(user.id());var b=counterBooking(staff);consumer.apply(counterSuccess(b,staff.id(),UUID.randomUUID()));UUID listing=UUID.randomUUID(),acquisition=UUID.randomUUID();var offer=new TransferLeaseService.Command(listing,b.id(),user.id(),new BigDecimal("100000"),start,null,null,null,null,null,null);transfers.command("register",offer);transfers.command("lock",new TransferLeaseService.Command(listing,b.id(),user.id(),null,null,acquisition,staff.id(),now.plusSeconds(300),null,null,null));var moved=transfers.command("complete",new TransferLeaseService.Command(listing,b.id(),user.id(),offer.price(),start,acquisition,staff.id(),now.plusSeconds(300),UUID.randomUUID(),now,"VND"));
-  assertThat(service.detail(moved.id(),user,"token").booking().bookingCode()).isNull();assertThat(operations.search(new Search(null,null,null,null,null,null,null,0,20),user,"token").items()).hasSize(1);assertThat(transfers.inspect(moved.id()).path("transferBlockedReason").asText()).isEmpty();assertThat(service.cancel(moved.id(),new CancelInput("Verified acquisition holder"),staff,"token").status()).isEqualTo("CANCELLED");
+  scopedPermissions();var original=counterStaff("BOOKING_CREATE_COUNTER");var staff=new Caller(original.id(),"Staff Customer",Set.of("STAFF","CUSTOMER"),original.facilityBindings());when(dependencies.counterCustomer(any(),any(),any())).thenReturn(user.id());var b=counterBooking(staff);
+  var event=(com.fasterxml.jackson.databind.node.ObjectNode)counterSuccess(b,staff.id(),UUID.randomUUID());((com.fasterxml.jackson.databind.node.ObjectNode)event.path("payload")).put("provider","DEMO").put("canonical",true);consumer.apply(event);
+  demoDeal(repo.find(b.id()),user,staff,demoOwner(),500,true);var moved=repo.find(b.id());assertThat(service.detail(moved.id(),user,"token").booking().bookingCode()).isNull();assertThat(operations.search(new Search(null,null,null,null,null,null,null,0,20),user,"token").items()).hasSize(1);assertThat(transfers.inspect(moved.id()).path("transferBlockedReason").asText()).isEmpty();cancelPolicy(moved,staff,"Verified acquisition holder");assertThat(repo.find(b.id()).status()).isEqualTo("CANCELLED");
  }
-
-
  @Autowired BookingReportingService reports;
  @Autowired ConfigurationGuardService configurationGuards;
  @Test void impactPreviewIsReadOnlyAndReturnsLiveHoldsWithoutPrivateData(){var hold=service.hold(input(),key(),user,"token",false);int before=repo.jdbc().queryForObject("SELECT count(*) FROM configuration_change_guards WHERE facility_id=?",Integer.class,facility);var result=configurationGuards.impact(facility);assertThat(result).hasSize(1);assertThat(result.getFirst().reservationId()).isEqualTo(hold.id());assertThat(json.valueToTree(result).toString()).doesNotContain("customer","amount","phone","email","token");assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM configuration_change_guards WHERE facility_id=?",Integer.class,facility)).isEqualTo(before);}
  @Test void bookingReportsRetainPaidCancellationCollectionsButExcludeUsageAndOtherFacilities(){
-  var hold=service.hold(input(),key(),user,"token",false);var booking=service.create(new CreateInput(hold.id(),null,null),key(),user,"token",false);consumer.apply(success(booking,UUID.randomUUID()));var owner=new Caller(UUID.randomUUID(),"Owner",Set.of("OWNER"),Map.of());
+  var booking=demoConfirmed();var owner=new Caller(UUID.randomUUID(),"Owner",Set.of("OWNER"),Map.of());
   var report=reports.activity(facility,now,end,"Asia/Ho_Chi_Minh",owner,"token");assertThat((List<?>)report.get("bookings")).hasSize(1);assertThat((List<?>)report.get("appliedCollections")).hasSize(1);var usage=(List<Map<String,Object>>)reports.activity(facility,start.plusSeconds(1800),end,"UTC",owner,"token").get("usage");assertThat((BigDecimal)usage.getFirst().get("booked_minutes")).isEqualByComparingTo("30");
-  service.cancel(booking.id(),new CancelInput("Customer cannot attend"),user,"token");var cancelled=reports.activity(facility,now,end,"UTC",owner,"token");assertThat((List<?>)cancelled.get("usage")).isEmpty();assertThat((List<?>)cancelled.get("appliedCollections")).hasSize(1);assertThat(cancelled).containsEntry("occupancy",null).containsEntry("netRevenue",null);
+  cancelPolicy(booking,user,"Customer cannot attend");var cancelled=reports.activity(facility,now,end,"UTC",owner,"token");assertThat((List<?>)cancelled.get("usage")).isEmpty();assertThat((List<?>)cancelled.get("appliedCollections")).hasSize(1);assertThat(cancelled).containsEntry("occupancy",null).containsEntry("netRevenue",null);
   assertThat((List<?>)reports.activity(UUID.randomUUID(),now,end,"UTC",owner,"token").get("bookings")).isEmpty();assertThatThrownBy(()->reports.activity(facility,now,end,"UTC",user,"token")).isInstanceOf(ForbiddenException.class);
   org.mockito.Mockito.doThrow(new ForbiddenException("Wrong owner")).when(dependencies).facilityPermission(org.mockito.ArgumentMatchers.eq(facility),org.mockito.ArgumentMatchers.eq(owner),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.eq("OWNER_REPORT"));assertThatThrownBy(()->reports.activity(facility,now,end,"UTC",owner,"token")).isInstanceOf(ForbiddenException.class);
  }
@@ -1008,4 +1225,297 @@ class BookingIntegrationTest {
  @Test void memberQrCannotCrossGroupsAndCannotScanAfterBookingCompletion(){var second=customer();var first=funded(second);var firstMember=recipient(first,second);var another=funded(customer());attendanceAcl();when(clock.instant()).thenReturn(start);var staff=scopedStaff();var qr=attendance.own(first.id(),second).token();assertThatThrownBy(()->attendance.scan(another.id(),new GroupAttendanceService.Scan(qr),staff,"token")).isInstanceOf(ForbiddenException.class);assertThatThrownBy(()->attendance.manual(another.id(),new GroupAttendanceService.Manual(firstMember.id(),"Staff verified a member from a different group"),staff,"token")).isInstanceOf(ResourceNotFoundException.class);attendance.scan(first.id(),new GroupAttendanceService.Scan(qr),staff,"token");when(clock.instant()).thenReturn(end.plusSeconds(1));service.complete(first.id(),staff,"token");assertThatThrownBy(()->attendance.scan(first.id(),new GroupAttendanceService.Scan(qr),staff,"token")).isInstanceOf(ConflictException.class);}
  @Test void memberQrCheckinTimeBoundaryIsHalfOpenAndNeverChangesPriceSnapshot(){var g=funded(customer());attendanceAcl();var staff=scopedStaff();var before=repo.find(g.id()).priceSnapshot();when(clock.instant()).thenReturn(start.minusSeconds(1801));var token=attendance.own(g.id(),user).token();assertThatThrownBy(()->attendance.scan(g.id(),new GroupAttendanceService.Scan(token),staff,"token")).isInstanceOf(ConflictException.class);when(clock.instant()).thenReturn(start.minusSeconds(1800));attendance.scan(g.id(),new GroupAttendanceService.Scan(token),staff,"token");assertThat(repo.find(g.id()).priceSnapshot()).isEqualTo(before);when(clock.instant()).thenReturn(end);assertThatThrownBy(()->attendance.manual(g.id(),new GroupAttendanceService.Manual(g.members().getLast().id(),"Verified actual player presence at booking end"),staff,"token")).isInstanceOf(ConflictException.class);}
 
+ @Test void convertedGuestHoldUsesBookingAuthorityAndCannotBeReleasedOrConvertedAgain()throws Exception{
+  scopedPermissions();var actor=counterStaff("BOOKING_CREATE_COUNTER","BOOKING_READ");
+  var hold=service.hold(input(),key(),actor,"token",true);String request=key();var create=new CreateInput(hold.id(),"Walk-in","0901234567");
+  var b=service.create(create,request,actor,"token",true);
+  assertThat(b.customerId()).isNull();assertThat(b.currentHolderId()).isNull();assertThat(service.ownHold(hold.id(),actor,"token").holderId()).isNull();
+  assertThat(service.create(create,request,actor,"token",true).id()).isEqualTo(b.id());
+  assertThatThrownBy(()->service.create(create,key(),actor,"token",true)).isInstanceOf(ConflictException.class);
+  assertThatThrownBy(()->service.releaseHold(hold.id(),actor,"token")).isInstanceOf(ConflictException.class);
+  assertThat(service.mine(actor,"token")).isEmpty();
+  var outsider=customer();assertThatThrownBy(()->service.ownHold(hold.id(),outsider,"token")).isInstanceOf(ForbiddenException.class);
+  assertThatThrownBy(()->service.releaseHold(hold.id(),outsider,"token")).isInstanceOf(ForbiddenException.class);
+  var revoked=new Caller(actor.id(),"Revoked",actor.roles(),Map.of());assertThatThrownBy(()->service.ownHold(hold.id(),revoked,"token")).isInstanceOf(ForbiddenException.class);
+  when(identity.current(any())).thenReturn(actor);
+  http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/bookings/holds/"+hold.id()).header("Authorization","Bearer operator"))
+    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.holderId").value(org.hamcrest.Matchers.nullValue()));
+  http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/v1/bookings/holds/"+hold.id()).header("Authorization","Bearer operator"))
+    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isConflict());
+  assertThat(repo.hold(hold.id()).state()).isEqualTo("HOLD");
+ }
+ @Test void convertedLinkedHoldIsReadableByCustomerAndScopedOperator(){
+  scopedPermissions();var actor=counterStaff("BOOKING_CREATE_COUNTER","BOOKING_READ");when(dependencies.counterCustomer(any(),any(),any())).thenReturn(user.id());
+  var hold=service.hold(input(),key(),actor,"token",true);service.create(new CreateInput(hold.id(),"Linked","0901234567"),key(),actor,"token",true);
+  assertThat(service.ownHold(hold.id(),user,"token").holderId()).isEqualTo(user.id());
+  assertThat(service.ownHold(hold.id(),actor,"token").holderId()).isEqualTo(user.id());
+  assertThatThrownBy(()->service.releaseHold(hold.id(),user,"token")).isInstanceOf(ConflictException.class);
+ }
+ @Test void paidGuestUsesManualFacilityCheckinAndRetainsNullOwnersThroughCompletion(){
+  scopedPermissions();var actor=counterStaff("BOOKING_CREATE_COUNTER","BOOKING_READ","BOOKING_CHECK_IN","BOOKING_COMPLETE");var b=counterBooking(actor);
+  var outcome=counterSuccess(b,actor.id(),UUID.randomUUID());consumer.apply(outcome);consumer.apply(outcome);
+  assertThat(service.detail(b.id(),actor,"token").checkinToken()).isNull();assertThat(service.detail(b.id(),actor,"token").checkinQrSvg()).isNull();
+  assertThatThrownBy(()->service.cancel(b.id(),new CancelInput("Counter paid cancellation"),actor,"token")).isInstanceOf(ConflictException.class).hasMessageContaining("cancel-with-policy");
+  assertThatThrownBy(()->service.checkinByCode(facility,new CodeInput(b.bookingCode()),actor,"token")).isInstanceOf(ConflictException.class);
+  when(clock.instant()).thenReturn(start.minusSeconds(1800));
+  assertThatThrownBy(()->service.checkinByCode(UUID.randomUUID(),new CodeInput(b.bookingCode()),actor,"token")).isInstanceOf(ForbiddenException.class);
+  var checked=service.checkinByCode(facility,new CodeInput(b.bookingCode().toLowerCase(Locale.ROOT)),actor,"token");
+  assertThat(checked.status()).isEqualTo("CHECKED_IN");assertThat(checked.currentHolderId()).isNull();assertThat(checked.customerId()).isNull();
+  assertThatThrownBy(()->service.checkinByCode(facility,new CodeInput(b.bookingCode()),actor,"token")).isInstanceOf(ConflictException.class);
+  when(clock.instant()).thenReturn(end);var completed=service.complete(b.id(),actor,"token");
+  assertThat(completed.status()).isEqualTo("COMPLETED");assertThat(completed.currentHolderId()).isNull();assertThat(completed.priceSnapshot()).isEqualTo(b.priceSnapshot());
+  assertThat(repo.history(b.id()).stream().filter(h->h.action().equals("CHECKED_IN")).count()).isEqualTo(1);
+  assertThat(repo.history(b.id()).stream().filter(h->h.action().equals("CONFIRMED")).findFirst().orElseThrow().actorId()).isEqualTo(actor.id());
+ }
+ @Test void httpSmokeCompletesOnlineLinkedAndGuestWithoutChangingOwnership()throws Exception{
+  scopedPermissions();var operator=counterStaff("BOOKING_CREATE_COUNTER","BOOKING_READ","BOOKING_CHECK_IN");
+  var facilityOwner=new Caller(UUID.randomUUID(),"Facility owner",Set.of("OWNER"),Map.of());
+  doNothing().when(dependencies).facilityPermission(facility,facilityOwner,"Bearer smoke","BOOKING_COMPLETE");
+  for(String model:List.of("ONLINE","LINKED","GUEST")){
+   when(clock.instant()).thenReturn(now);court=UUID.randomUUID();((com.fasterxml.jackson.databind.node.ObjectNode)quote).put("courtId",court.toString());
+   boolean counter=!model.equals("ONLINE");var actor=counter?operator:user;
+   when(dependencies.counterCustomer(any(),any(),any())).thenReturn(model.equals("LINKED")?user.id():null);
+   when(identity.current(any())).thenReturn(actor);
+   var held=http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/bookings/holds").param("counter",Boolean.toString(counter)).header("Idempotency-Key",key()).header("Authorization","Bearer smoke").contentType("application/json").content(json.writeValueAsString(input())))
+    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isCreated()).andReturn().getResponse().getContentAsString();
+   UUID holdId=UUID.fromString(json.readTree(held).path("data").path("id").asText());
+   var created=http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/bookings").param("counter",Boolean.toString(counter)).header("Idempotency-Key",key()).header("Authorization","Bearer smoke").contentType("application/json").content(json.writeValueAsString(new CreateInput(holdId,counter?"HTTP Guest":null,counter?"0901234567":null))))
+    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isCreated()).andReturn().getResponse().getContentAsString();
+   UUID id=UUID.fromString(json.readTree(created).path("data").path("id").asText());var b=repo.find(id);UUID expected=model.equals("GUEST")?null:user.id();
+   assertThat(b.currentHolderId()).isEqualTo(expected);assertThat(b.customerId()).isEqualTo(expected);
+   http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/bookings/"+id+"/payable").header("Authorization","Bearer smoke"))
+    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.payerId").value(actor.id().toString()));
+   consumer.apply(counterSuccess(b,actor.id(),UUID.randomUUID()));when(clock.instant()).thenReturn(start.minusSeconds(1800));when(identity.current(any())).thenReturn(operator);
+   http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/bookings/facility/"+facility+"/check-in-by-code").header("Authorization","Bearer smoke").contentType("application/json").content(json.writeValueAsString(new CodeInput(b.bookingCode()))))
+    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.status").value("CHECKED_IN"));
+   when(clock.instant()).thenReturn(end);when(identity.current(any())).thenReturn(facilityOwner);
+   http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/bookings/"+id+"/complete").header("Authorization","Bearer smoke"))
+    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.status").value("COMPLETED"));
+   var completed=repo.find(id);assertThat(completed.currentHolderId()).isEqualTo(expected);assertThat(completed.customerId()).isEqualTo(expected);assertThat(completed.priceSnapshot()).isEqualTo(b.priceSnapshot());
+   assertThat(repo.history(id).stream().filter(h->h.action().equals("COMPLETED")).findFirst().orElseThrow().actorId()).isEqualTo(facilityOwner.id());
+  }
+ }
+ void cancelPolicy(Booking booking,Caller actor,String reason){var quote=policyCancellation.quote(booking.id(),actor,"token");policyCancellation.cancel(booking.id(),new BookingPolicyCancellation.Input((UUID)quote.get("id"),reason),key(),actor,"token");}
+ Booking demoConfirmed(){var h=service.hold(new HoldInput(court,start,end,quote.path("amount").decimalValue()),key(),user,"token",false);var b=service.create(new CreateInput(h.id(),null,null),key(),user,"token",false);var event=(com.fasterxml.jackson.databind.node.ObjectNode)success(b,UUID.randomUUID());((com.fasterxml.jackson.databind.node.ObjectNode)event.path("payload")).put("provider","DEMO").put("canonical",true);consumer.apply(event);return repo.find(b.id());}
+ record DemoDeal(TransferLeaseService.Command command,Caller seller,Caller buyer,Caller owner,JsonNode terms){}
+ void demoAcl(Caller owner){
+  var real=new BookingDependencies("http://unused.invalid","http://unused.invalid");
+  doAnswer(a->{var actor=a.<Caller>getArgument(1);if(actor.hasRole("OWNER")){if(!actor.id().equals(owner.id())||!a.getArgument(0).equals(facility))throw new ForbiddenException("Wrong facility Owner");return null;}real.facilityPermission(a.getArgument(0),actor,a.getArgument(2),a.getArgument(3));return null;}).when(dependencies).facilityPermission(any(),any(),any(),any());
+ }
+ DemoDeal demoDeal(Booking b,Caller seller,Caller buyer,Caller owner,int rate,boolean complete){
+  demoAcl(owner);UUID listing=UUID.randomUUID(),acquisition=UUID.randomUUID(),payment=UUID.randomUUID();Instant deadline=start.minusSeconds(60),expiry=now.plusSeconds(600);
+  var source=(com.fasterxml.jackson.databind.node.ObjectNode)json.valueToTree(b);source.set("refundPolicy",b.priceSnapshot().path("refundPolicy"));
+  var receiver=json.createObjectNode().put("id",facility.toString()).put("ownerId",owner.id().toString()).put("name","Demo Facility");
+  var fee=json.createObjectNode().put("configured",true).put("feeBps",rate).put("version",1).put("termsHash",com.sporthub.common.security.Signatures.sha256(facility+"|1|"+rate+"|VND|HALF_UP|FACILITY_TRANSFER_FEE"));
+  var sellerTerms=com.sporthub.common.money.DemoTransferTerms.seller(json,source,receiver,fee,seller.id(),new BigDecimal("100000"),deadline);
+  var terms=com.sporthub.common.money.TransferFinancialTerms.acquisition(sellerTerms,listing,1,acquisition,buyer.id(),expiry,now);
+  transfers.command("register",new TransferLeaseService.Command(listing,b.id(),seller.id(),new BigDecimal("100000"),deadline,null,null,null,null,null,"VND"));
+  transfers.command("lock",new TransferLeaseService.Command(listing,b.id(),seller.id(),new BigDecimal("100000"),deadline,acquisition,buyer.id(),expiry,null,null,"VND"));
+  var payload=json.createObjectNode().put("bookingId",b.id().toString()).put("paymentId",payment.toString()).put("payerId",buyer.id().toString()).put("acquisitionId",acquisition.toString()).put("purpose","TRANSFER").put("amount",100000).put("currency","VND").put("status","SUCCESS").put("paidAt",now.toString()).put("provider","DEMO").put("canonical",true);payload.set("transferTerms",terms);
+  consumer.apply(json.valueToTree(DomainEvent.create("payment.completed",1,"payment-service",payment,payload)));
+  var command=new TransferLeaseService.Command(listing,b.id(),seller.id(),new BigDecimal("100000"),deadline,acquisition,buyer.id(),expiry,payment,now,"VND",terms);
+  if(complete)transfers.command("complete",command);return new DemoDeal(command,seller,buyer,owner,terms);
+ }
+ Caller demoOwner(){return new Caller(UUID.randomUUID(),"Demo Owner",Set.of("OWNER"),Map.of());}
+ @Test void demoSellerPayoutDoesNotGateBuyerCheckinAndIsScopedIdempotentAndRetryable()throws Exception{
+  var b=demoConfirmed();var deal=demoDeal(b,user,customer(),demoOwner(),500,true);var c=deal.command();
+  var initial=repo.jdbc().queryForMap("SELECT * FROM demo_transfer_settlements WHERE acquisition_id=?",c.acquisitionId());
+  assertThat(initial.get("payout_state")).isEqualTo("UNPAID");assertThat((BigDecimal)initial.get("fee_amount")).isEqualByComparingTo("5000");assertThat((BigDecimal)initial.get("seller_net_amount")).isEqualByComparingTo("95000");
+  assertThatThrownBy(()->demoFinance.paySeller(c.acquisitionId(),new BookingDemoFinance.Outcome("SUCCESS"),key(),user,"token")).isInstanceOf(ForbiddenException.class);
+  assertThatThrownBy(()->demoFinance.paySeller(c.acquisitionId(),new BookingDemoFinance.Outcome("SUCCESS"),key(),counterStaff("BOOKING_REFUND"),"token")).isInstanceOf(ForbiddenException.class);
+  var staff=counterStaff("TRANSFER_PAYOUT");String failedKey=key();
+  assertThat(demoFinance.paySeller(c.acquisitionId(),new BookingDemoFinance.Outcome("FAILED"),failedKey,staff,"token").get("payoutState")).isEqualTo("FAILED");
+  var revoked=new Caller(staff.id(),staff.fullName(),staff.roles(),Map.of());
+  assertThatThrownBy(()->demoFinance.paySeller(c.acquisitionId(),new BookingDemoFinance.Outcome("SUCCESS"),key(),revoked,"token")).isInstanceOf(ForbiddenException.class);
+  when(clock.instant()).thenReturn(start.minusSeconds(1800));var qr=service.detail(b.id(),deal.buyer(),"token").checkinToken();
+  assertThat(service.checkin(b.id(),new CheckinInput(qr),deal.owner(),"token").status()).isEqualTo("CHECKED_IN");
+  String paidKey=key();var paid=demoFinance.paySeller(c.acquisitionId(),new BookingDemoFinance.Outcome("SUCCESS"),paidKey,deal.owner(),"token");
+  assertThat(paid.get("payoutState")).isEqualTo("PAID");assertThat(paid.get("sellerNetAmount")).isEqualTo("95000");
+  assertThat(json.readTree(json.writeValueAsString(demoFinance.paySeller(c.acquisitionId(),new BookingDemoFinance.Outcome("SUCCESS"),paidKey,deal.owner(),"token")))).isEqualTo(json.readTree(json.writeValueAsString(paid)));
+  assertThatThrownBy(()->demoFinance.paySeller(c.acquisitionId(),new BookingDemoFinance.Outcome("FAILED"),paidKey,deal.owner(),"token")).isInstanceOf(ConflictException.class);
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM demo_money_events WHERE subject_id=? AND outcome='SUCCESS'",Integer.class,c.acquisitionId())).isEqualTo(1);
+  assertThat(repo.find(b.id()).currentHolderId()).isEqualTo(deal.buyer().id());verifyNoInteractions(paymentEvidence);
+ }
+ @Test void demoCancellationRefundUsesTheCurrentBuyerAndDoesNotReverseSellerPayable(){
+  var b=demoConfirmed();var deal=demoDeal(b,user,customer(),demoOwner(),500,true);
+  var q=policyCancellation.quote(b.id(),deal.buyer(),"token");assertThat(q.get("baseAmount")).isEqualTo("100000");assertThat(q.get("targetAmount")).isEqualTo("80000");
+  assertThatThrownBy(()->policyCancellation.quote(b.id(),user,"token")).isInstanceOf(ForbiddenException.class);
+  String cancellationKey=key();var input=new BookingPolicyCancellation.Input((UUID)q.get("id"),"Demo policy cancellation");
+  var cancelled=policyCancellation.cancel(b.id(),input,cancellationKey,deal.buyer(),"token");var refund=(Map<?,?>)cancelled.get("refund");UUID refundId=(UUID)refund.get("id");
+  assertThat(cancelled.get("status")).isEqualTo("CANCELLED");assertThat(refund.get("targetAmount")).isEqualTo("80000");
+  assertThat(policyCancellation.cancel(b.id(),input,cancellationKey,deal.buyer(),"token").get("refund")).isEqualTo(refund);
+  assertThatThrownBy(()->demoFinance.refund(refundId,new BookingDemoFinance.Outcome("SUCCESS"),key(),deal.buyer(),"token")).isInstanceOf(ForbiddenException.class);
+  assertThatThrownBy(()->demoFinance.refund(refundId,new BookingDemoFinance.Outcome("SUCCESS"),key(),counterStaff("TRANSFER_PAYOUT"),"token")).isInstanceOf(ForbiddenException.class);
+  var staff=counterStaff("BOOKING_REFUND");
+  assertThat(demoFinance.refund(refundId,new BookingDemoFinance.Outcome("FAILED"),key(),staff,"token").get("state")).isEqualTo("FAILED");
+  assertThat(demoFinance.refund(refundId,new BookingDemoFinance.Outcome("SUCCESS"),key(),staff,"token").get("state")).isEqualTo("REFUNDED");
+  assertThat(repo.jdbc().queryForObject("SELECT payout_state FROM demo_transfer_settlements WHERE acquisition_id=?",String.class,deal.command().acquisitionId())).isEqualTo("UNPAID");
+  assertThat(repo.jdbc().queryForObject("SELECT sum(amount) FROM demo_money_events WHERE subject_id=? AND outcome='SUCCESS'",BigDecimal.class,refundId)).isEqualByComparingTo("80000");
+  assertThatThrownBy(()->service.checkinByCode(facility,new CodeInput(repo.find(b.id()).bookingCode()),deal.owner(),"token")).isInstanceOf(ConflictException.class);
+ }
+ @Test void demoAbortedHandoffCreatesAFullRefundWithoutFeesOrSellerDebt(){
+  var b=demoConfirmed();var deal=demoDeal(b,user,customer(),demoOwner(),500,false);var c=deal.command();
+  assertThat(transfers.abort(c,"DEMO handoff rejected").get("decision")).isEqualTo("ABORTED");
+  assertThatThrownBy(()->transfers.command("complete",c)).isInstanceOf(ConflictException.class);
+  var row=repo.jdbc().queryForMap("SELECT * FROM demo_refund_requests WHERE source_key=?","TECHNICAL:"+c.paymentId());
+  assertThat((BigDecimal)row.get("target_amount")).isEqualByComparingTo("100000");assertThat(row.get("reason")).isEqualTo("TECHNICAL_TRANSFER_FAILURE");
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM demo_transfer_settlements WHERE acquisition_id=?",Integer.class,c.acquisitionId())).isZero();
+  assertThat(demoFinance.refund((UUID)row.get("id"),new BookingDemoFinance.Outcome("SUCCESS"),key(),deal.owner(),"token").get("state")).isEqualTo("REFUNDED");
+  transfers.abort(c,"DEMO abort replay");assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM demo_refund_requests WHERE source_key=?",Integer.class,"TECHNICAL:"+c.paymentId())).isEqualTo(1);
+  assertThat(repo.find(b.id()).currentHolderId()).isEqualTo(user.id());
+ }
+ @Test void demoWholeFeeNeedsNoSellerPaymentOrBankAccount(){
+  var b=demoConfirmed();var deal=demoDeal(b,user,customer(),demoOwner(),10000,true);
+  assertThat(demoFinance.paySeller(deal.command().acquisitionId(),new BookingDemoFinance.Outcome("SUCCESS"),key(),deal.owner(),"token").get("payoutState")).isEqualTo("NOT_REQUIRED");
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM demo_money_events WHERE subject_id=?",Integer.class,deal.command().acquisitionId())).isZero();
+ }
+ @Test void demoRejectsStaleQuotesAndLegacyWithoutApplicationModeInsteadOfInventingProof(){
+  var b=demoConfirmed();var owner=demoOwner();demoAcl(owner);var q=policyCancellation.quote(b.id(),user,"token");
+  when(clock.instant()).thenReturn(now.plusSeconds(301));
+  assertThatThrownBy(()->policyCancellation.cancel(b.id(),new BookingPolicyCancellation.Input((UUID)q.get("id"),"Expired quote"),key(),user,"token")).isInstanceOf(ConflictException.class);
+  assertThat(repo.find(b.id()).status()).isEqualTo("CONFIRMED");
+  when(clock.instant()).thenReturn(now);court=UUID.randomUUID();((com.fasterxml.jackson.databind.node.ObjectNode)quote).put("courtId",court.toString());var legacy=confirmed();
+  assertThatThrownBy(()->policyCancellation.quote(legacy.id(),user,"token")).isInstanceOf(ConflictException.class);
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM demo_refund_requests WHERE booking_id=?",Integer.class,legacy.id())).isZero();
+ }
+ void demoReportAccess(Caller owner){
+  when(dependencies.ownerFacility(eq(facility),eq(owner),any())).thenReturn(json.createObjectNode().put("id",facility.toString()).put("ownerId",owner.id().toString()).put("timezone","Asia/Ho_Chi_Minh"));
+  when(dependencies.ownerCourts(eq(facility),any())).thenReturn(json.createArrayNode().add(json.createObjectNode().put("id",court.toString()).put("name","Sân DEMO")));
+ }
+ @Test void demoReportSeparatesOwnerRevenueRefundsAndCashflowAndPagesWithoutDuplicates()throws Exception{
+  ((com.fasterxml.jackson.databind.node.ObjectNode)quote).put("amount",120000);var b=demoConfirmed();var deal=demoDeal(b,user,customer(),demoOwner(),500,true);demoReportAccess(deal.owner());
+  var q=policyCancellation.quote(b.id(),deal.buyer(),"token");var cancelled=policyCancellation.cancel(b.id(),new BookingPolicyCancellation.Input((UUID)q.get("id"),"Demo report cancellation"),key(),deal.buyer(),"token");UUID refund=(UUID)((Map<?,?>)cancelled.get("refund")).get("id");
+  when(clock.instant()).thenReturn(now.plusSeconds(1));var date=LocalDate.of(2026,10,5);
+  var pending=demoReports.dashboard(facility,date,date,0,2,deal.owner(),"token");
+  assertThat(pending.summary().money().operatingRevenue()).isEqualTo("125000");assertThat(pending.summary().money().policyRefunded()).isEqualTo("0");assertThat(pending.summary().money().refundDue()).isEqualTo("80000");
+  demoFinance.refund(refund,new BookingDemoFinance.Outcome("FAILED"),key(),deal.owner(),"token");
+  demoFinance.refund(refund,new BookingDemoFinance.Outcome("SUCCESS"),key(),deal.owner(),"token");
+  when(clock.instant()).thenReturn(now.plusSeconds(2));var report=demoReports.dashboard(facility,date,date,0,2,deal.owner(),"token");var money=report.summary().money();
+  assertThat(report.moneyAvailability()).isEqualTo("COMPLETE");assertThat(money.courtCollected()).isEqualTo("120000");assertThat(money.transferFees()).isEqualTo("5000");assertThat(money.operatingRevenue()).isEqualTo("125000");assertThat(money.policyRefunded()).isEqualTo("80000");assertThat(money.afterRefund()).isEqualTo("45000");assertThat(money.transferCollected()).isEqualTo("100000");assertThat(money.sellerDue()).isEqualTo("95000");assertThat(money.refundDue()).isEqualTo("0");
+  assertThat(report.courts()).hasSize(1);assertThat(report.courts().getFirst().money().afterRefund()).isEqualTo("45000");assertThat(report.daily()).hasSize(1);assertThat(report.daily().getFirst().policyRefunded()).isEqualTo("80000");
+  var ids=new HashSet<String>();long beforeEvents=repo.jdbc().queryForObject("SELECT count(*) FROM demo_money_events WHERE booking_id=?",Long.class,b.id());
+  for(int page=0;page<report.transactions().totalPages();page++)for(var item:demoReports.dashboard(facility,date,date,page,2,deal.owner(),"token").transactions().items())assertThat(ids.add(item.id())).isTrue();
+  assertThat(ids).hasSize((int)report.transactions().total());assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM demo_money_events WHERE booking_id=?",Long.class,b.id())).isEqualTo(beforeEvents);
+  when(identity.current(any())).thenReturn(deal.owner());
+  http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/bookings/reports/facility/"+facility+"/dashboard").header("Authorization","Bearer demo").param("fromDate","2026-10-06").param("toDate","2026-10-05")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
+  http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/bookings/reports/facility/"+facility+"/dashboard").header("Authorization","Bearer demo").param("fromDate","2026-02-30").param("toDate","2026-03-01")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
+  assertThatThrownBy(()->demoReports.dashboard(facility,date,date,0,25,counterStaff("BOOKING_REFUND","TRANSFER_PAYOUT"),"token")).isInstanceOf(ForbiddenException.class);
+  assertThatThrownBy(()->demoReports.dashboard(facility,date,date,0,25,demoOwner(),"token")).isInstanceOf(ForbiddenException.class);
+ }
+ @Test void demoReportOutstandingBalancesIncludePriorPeriodsAndLaterPaymentsDoNotRewriteThem(){
+  var b=demoConfirmed();var deal=demoDeal(b,user,customer(),demoOwner(),500,true);demoReportAccess(deal.owner());when(clock.instant()).thenReturn(now.plusSeconds(3*86400));
+  var from=LocalDate.of(2026,10,6);var to=LocalDate.of(2026,10,7);
+  var historical=demoReports.dashboard(facility,from,to,0,25,deal.owner(),"token");assertThat(historical.summary().money().sellerDue()).isEqualTo("95000");assertThat(historical.summary().money().operatingRevenue()).isEqualTo("0");
+  demoFinance.paySeller(deal.command().acquisitionId(),new BookingDemoFinance.Outcome("SUCCESS"),key(),deal.owner(),"token");
+  assertThat(demoReports.dashboard(facility,from,to,0,25,deal.owner(),"token").summary().money().sellerDue()).isEqualTo("95000");
+  when(clock.instant()).thenReturn(now.plusSeconds(3*86400+1));var date=LocalDate.of(2026,10,8);var paid=demoReports.dashboard(facility,date,date,0,25,deal.owner(),"token");assertThat(paid.summary().money().sellerPaid()).isEqualTo("95000");assertThat(paid.summary().money().sellerDue()).isEqualTo("0");
+ }
+ @Test void demoPartialGroupCancellationAllocatesOnlyActualPaidMoneyAndKeepsMutationGuards(){
+  var owner=demoOwner();demoAcl(owner);when(dependencies.refundPolicy(any())).thenAnswer(a->policy(a.getArgument(0),5000,1));start=now.plusSeconds(86400);end=start.plusSeconds(3600);
+  ((com.fasterxml.jackson.databind.node.ObjectNode)quote).put("startsAt",start.toString()).put("endsAt",end.toString()).put("amount",300000);
+  var h=service.hold(new HoldInput(court,start,end,new BigDecimal("300000")),key(),user,"token",false);var g=groups.create(new CreateGroup(h.id(),"Demo paid group",10),key(),user,"token");
+  String invite=groups.invite(g.id(),user).code();groups.join(new JoinGroup(invite),customer());groups.join(new JoinGroup(invite),customer());g=groups.split(g.id(),new Split("EQUAL",null),user);
+  var member=g.members().stream().filter(m->m.userId().equals(user.id())).findFirst().orElseThrow();groups.payable(g.id(),member.id(),user);
+  var event=(com.fasterxml.jackson.databind.node.ObjectNode)contribution(g,member,user,UUID.randomUUID());((com.fasterxml.jackson.databind.node.ObjectNode)event.path("payload")).put("provider","DEMO").put("canonical",true);consumer.apply(event);
+  var q=policyCancellation.quote(g.id(),user,"token");assertThat(q.get("baseAmount")).isEqualTo("100000");assertThat(q.get("targetAmount")).isEqualTo("50000");
+  var cancelled=policyCancellation.cancel(g.id(),new BookingPolicyCancellation.Input((UUID)q.get("id"),"Partial group cancellation"),key(),user,"token");assertThat(groups.detail(g.id(),user).state()).isEqualTo("GROUP_CANCELLED");
+  UUID refund=(UUID)((Map<?,?>)cancelled.get("refund")).get("id");assertThat(demoFinance.refund(refund,new BookingDemoFinance.Outcome("SUCCESS"),key(),owner,"token").get("state")).isEqualTo("REFUNDED");
+  UUID groupId=g.id();assertThatThrownBy(()->groups.split(groupId,new Split("EQUAL",null),user)).isInstanceOf(ConflictException.class);
+  assertThatThrownBy(()->repo.jdbc().update("UPDATE group_members SET amount_due=1 WHERE id=?",member.id())).isInstanceOf(org.springframework.dao.DataAccessException.class);
+ }
+ @Test void demoGuestRefundHasNoFakeCustomerOrStaffPayee(){
+  var owner=demoOwner();demoAcl(owner);var staff=counterStaff("BOOKING_CREATE_COUNTER","BOOKING_REFUND");var b=counterBooking(staff);
+  var event=(com.fasterxml.jackson.databind.node.ObjectNode)counterSuccess(b,staff.id(),UUID.randomUUID());((com.fasterxml.jackson.databind.node.ObjectNode)event.path("payload")).put("provider","DEMO").put("canonical",true);consumer.apply(event);
+  var q=policyCancellation.quote(b.id(),staff,"token");var cancelled=policyCancellation.cancel(b.id(),new BookingPolicyCancellation.Input((UUID)q.get("id"),"Guest cancels at facility"),key(),staff,"token");UUID refund=(UUID)((Map<?,?>)cancelled.get("refund")).get("id");
+  var result=demoFinance.refund(refund,new BookingDemoFinance.Outcome("SUCCESS"),key(),staff,"token");assertThat(result.get("recipientKind")).isEqualTo("GUEST");assertThat(repo.find(b.id()).currentHolderId()).isNull();assertThat(repo.find(b.id()).customerId()).isNull();
+  var execution=repo.jdbc().queryForMap("SELECT payee_id,guest_booking_id FROM demo_money_events WHERE subject_id=? AND outcome='SUCCESS'",refund);assertThat(execution.get("payee_id")).isNull();assertThat(execution.get("guest_booking_id")).isEqualTo(b.id());
+  var staffCustomer=new Caller(staff.id(),staff.fullName(),Set.of("STAFF","CUSTOMER"),staff.facilityBindings());assertThat((List<?>)demoFinance.mine(staffCustomer).get("refunds")).isEmpty();
+ }
+ @Test void demoAdminCanMonitorButCannotExecuteFacilityMoneyOrReadOwnerReports(){
+  var b=demoConfirmed();var deal=demoDeal(b,user,customer(),demoOwner(),500,true);var admin=new Caller(UUID.randomUUID(),"Admin",Set.of("ADMIN"),Map.of());
+  assertThat((List<?>)demoFinance.monitor(now.minusSeconds(1),now.plusSeconds(1),admin).get("settlements")).anySatisfy(item->assertThat(((Map<?,?>)item).get("acquisitionId")).isEqualTo(deal.command().acquisitionId()));
+  assertThatThrownBy(()->demoFinance.paySeller(deal.command().acquisitionId(),new BookingDemoFinance.Outcome("SUCCESS"),key(),admin,"token")).isInstanceOf(ForbiddenException.class);
+  assertThatThrownBy(()->demoReports.dashboard(facility,null,null,0,25,admin,"token")).isInstanceOf(ForbiddenException.class);
+ }
+ @Test void demoConcurrentOperatorsCommitOneSellerPaymentAndOneRefund()throws Exception{
+  var b=demoConfirmed();var deal=demoDeal(b,user,customer(),demoOwner(),500,true);var staff=counterStaff("TRANSFER_PAYOUT","BOOKING_REFUND");
+  try(var pool=Executors.newFixedThreadPool(2)){
+   var go=new CountDownLatch(1);var a=pool.submit(()->{go.await();return demoFinance.paySeller(deal.command().acquisitionId(),new BookingDemoFinance.Outcome("SUCCESS"),key(),deal.owner(),"token");});var c=pool.submit(()->{go.await();return demoFinance.paySeller(deal.command().acquisitionId(),new BookingDemoFinance.Outcome("SUCCESS"),key(),staff,"token");});go.countDown();assertThat(a.get(10,TimeUnit.SECONDS).get("payoutState")).isEqualTo("PAID");assertThat(c.get(10,TimeUnit.SECONDS).get("payoutState")).isEqualTo("PAID");
+  }
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM demo_money_events WHERE subject_id=? AND outcome='SUCCESS'",Integer.class,deal.command().acquisitionId())).isEqualTo(1);
+  var q=policyCancellation.quote(b.id(),deal.buyer(),"token");var cancelled=policyCancellation.cancel(b.id(),new BookingPolicyCancellation.Input((UUID)q.get("id"),"Concurrent refund"),key(),deal.buyer(),"token");UUID refund=(UUID)((Map<?,?>)cancelled.get("refund")).get("id");
+  try(var pool=Executors.newFixedThreadPool(2)){
+   var go=new CountDownLatch(1);var a=pool.submit(()->{go.await();return demoFinance.refund(refund,new BookingDemoFinance.Outcome("SUCCESS"),key(),deal.owner(),"token");});var c=pool.submit(()->{go.await();return demoFinance.refund(refund,new BookingDemoFinance.Outcome("SUCCESS"),key(),staff,"token");});go.countDown();assertThat(a.get(10,TimeUnit.SECONDS).get("state")).isEqualTo("REFUNDED");assertThat(c.get(10,TimeUnit.SECONDS).get("state")).isEqualTo("REFUNDED");
+  }
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM demo_money_events WHERE subject_id=? AND outcome='SUCCESS'",Integer.class,refund)).isEqualTo(1);
+ }
+ @Test void demoHttpUsesServerMoneyAndRejectsWrongFacilityDespiteForgedBody()throws Exception{
+  var b=demoConfirmed();var deal=demoDeal(b,user,customer(),demoOwner(),500,true);var input=Map.of("outcome","SUCCESS","amount","1","payeeId",UUID.randomUUID(),"facilityId",UUID.randomUUID());
+  when(identity.current(any())).thenReturn(new Caller(UUID.randomUUID(),"Wrong facility",Set.of("STAFF"),Map.of(UUID.randomUUID(),Set.of("TRANSFER_PAYOUT"))));
+  http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/bookings/demo-finance/settlements/"+deal.command().acquisitionId()+"/pay-seller").header("Authorization","Bearer demo").header("Idempotency-Key",key()).contentType("application/json").content(json.writeValueAsString(input))).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+  when(identity.current(any())).thenReturn(deal.owner());
+  http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/bookings/demo-finance/settlements/"+deal.command().acquisitionId()+"/pay-seller").header("Authorization","Bearer demo").header("Idempotency-Key",key()).contentType("application/json").content(json.writeValueAsString(input))).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.sellerNetAmount").value("95000")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.performedBy").value(deal.owner().id().toString()));
+  assertThatThrownBy(()->repo.jdbc().update("UPDATE demo_transfer_settlements SET amount=1 WHERE acquisition_id=?",deal.command().acquisitionId())).isInstanceOf(org.springframework.dao.DataAccessException.class);
+  assertThatThrownBy(()->repo.jdbc().update("DELETE FROM demo_money_events WHERE subject_id=?",deal.command().acquisitionId())).isInstanceOf(org.springframework.dao.DataAccessException.class);
+ }
+ @Test void demoResaleChainRefundsOnlyLatestBuyerAndKeepsBothSellerDebts(){
+  var b=demoConfirmed();var owner=demoOwner();var first=demoDeal(b,user,customer(),owner,500,true);
+  var second=demoDeal(repo.find(b.id()),first.buyer(),customer(),owner,1000,true);
+  assertThat(repo.find(b.id()).currentHolderId()).isEqualTo(second.buyer().id());
+  assertThatThrownBy(()->policyCancellation.quote(b.id(),first.buyer(),"token")).isInstanceOf(ForbiddenException.class);
+  var q=policyCancellation.quote(b.id(),second.buyer(),"token");assertThat(q.get("baseAmount")).isEqualTo("100000");
+  var cancelled=policyCancellation.cancel(b.id(),new BookingPolicyCancellation.Input((UUID)q.get("id"),"Latest buyer cancels"),key(),second.buyer(),"token");
+  UUID refund=(UUID)((Map<?,?>)cancelled.get("refund")).get("id");
+  demoFinance.refund(refund,new BookingDemoFinance.Outcome("SUCCESS"),key(),owner,"token");
+  assertThat(repo.jdbc().queryForObject("SELECT payee_id FROM demo_money_events WHERE subject_id=? AND outcome='SUCCESS'",UUID.class,refund)).isEqualTo(second.buyer().id());
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM demo_transfer_settlements WHERE booking_id=? AND payout_state='UNPAID'",Integer.class,b.id())).isEqualTo(2);
+  assertThat(repo.jdbc().queryForObject("SELECT sum(fee_amount) FROM demo_transfer_settlements WHERE booking_id=?",BigDecimal.class,b.id())).isEqualByComparingTo("15000");
+ }
+ @Test void demoPolicyCancelRacingCheckinHasOneWinnerAndNoRefundForCheckedInBooking()throws Exception{
+  var b=demoConfirmed();var owner=demoOwner();demoAcl(owner);when(clock.instant()).thenReturn(start.minusSeconds(1800));
+  var q=policyCancellation.quote(b.id(),user,"token");var token=service.detail(b.id(),user,"token").checkinToken();
+  try(var pool=java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()){
+   var cancel=pool.submit(()->{try{return policyCancellation.cancel(b.id(),new BookingPolicyCancellation.Input((UUID)q.get("id"),"Concurrent cancellation"),key(),user,"token").get("status");}catch(ConflictException expected){return "CONFLICT";}});
+   var checkin=pool.submit(()->{try{return service.checkin(b.id(),new CheckinInput(token),owner,"token").status();}catch(ConflictException expected){return "CONFLICT";}});
+   assertThat(List.of(cancel.get(10,TimeUnit.SECONDS),checkin.get(10,TimeUnit.SECONDS))).contains("CONFLICT");
+  }
+  var status=repo.find(b.id()).status();assertThat(status).isIn("CANCELLED","CHECKED_IN");
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM demo_refund_requests WHERE booking_id=?",Integer.class,b.id())).isEqualTo(status.equals("CANCELLED")?1:0);
+ }
+ @Test void demoMissingLegacyFactsAreUnavailableRatherThanACompleteZero(){
+  var b=confirmed();var owner=demoOwner();demoReportAccess(owner);
+  when(paymentEvidence.read(any())).thenReturn(new PaymentEvidenceClient.Result(Map.of(),Map.of(),List.of(),List.of("PAYMENT_SOURCE_TIMEOUT"),1));
+  var date=now.atZone(java.time.ZoneId.of("Asia/Ho_Chi_Minh")).toLocalDate();var report=demoReports.dashboard(facility,date,date,0,25,owner,"token");
+  assertThat(report.moneyAvailability()).isEqualTo("UNAVAILABLE");assertThat(report.reasons()).contains("PAYMENT_SOURCE_TIMEOUT","PAYMENT_APPLICATION_FACTS_UNAVAILABLE");
+  assertThat(report.transactions().items()).isEmpty();verify(paymentEvidence).read(any());
+ }
+ @Test void demoReportMissingReceiptIsUnavailableAndUsageNeverExtendsBeyondBookedEnd(){
+  var legacy=legacyConfirmedProof(false,false,false);var owner=demoOwner();demoReportAccess(owner);
+  var date=now.atZone(java.time.ZoneId.of("Asia/Ho_Chi_Minh")).toLocalDate();var incomplete=demoReports.dashboard(facility,date,date,0,25,owner,"token");
+  assertThat(incomplete.moneyAvailability()).isEqualTo("UNAVAILABLE");assertThat(incomplete.reasons()).contains("APPLIED_TOTAL_NEEDS_REVIEW");
+  var booking=demoConfirmed();demoAcl(owner);demoReportAccess(owner);
+  when(clock.instant()).thenReturn(start.minusSeconds(60));var credential=service.detail(booking.id(),user,"token").checkinToken();service.checkin(booking.id(),new CheckinInput(credential),owner,"token");
+  when(clock.instant()).thenReturn(end.plusSeconds(7*86400));var playDate=start.atZone(java.time.ZoneId.of("Asia/Ho_Chi_Minh")).toLocalDate();
+  var report=demoReports.dashboard(facility,playDate,playDate,0,25,owner,"token");assertThat(report.summary().usedMinutes()).isEqualTo("60");assertThat(report.summary().bookedMinutes()).isEqualTo("60");assertThat(repo.find(booking.id()).status()).isEqualTo("CHECKED_IN");
+ }
+ @Test void demoRefundCapacityAndExecutionAmountsCannotBeForgedInDatabase(){
+  var b=demoConfirmed();var owner=demoOwner();demoAcl(owner);var q=policyCancellation.quote(b.id(),user,"token");
+  var cancelled=policyCancellation.cancel(b.id(),new BookingPolicyCancellation.Input((UUID)q.get("id"),"Capacity test"),key(),user,"token");UUID refund=(UUID)((Map<?,?>)cancelled.get("refund")).get("id");
+  assertThatThrownBy(()->new org.springframework.transaction.support.TransactionTemplate(txManager).executeWithoutResult(tx->repo.jdbc().update("INSERT INTO demo_refund_requests SELECT gen_random_uuid(),'FORGED:'||id,booking_id,facility_id,court_id,quote_id,acquisition_id,reason,base_amount,rate_bps,target_amount,policy_version,policy_hash,allocations,requested_by,state,created_at,refunded_at,performed_by,version FROM demo_refund_requests WHERE id=?",refund))).isInstanceOf(org.springframework.dao.DataAccessException.class).hasMessageContaining("DEMO refunds exceed original payment");
+  assertThatThrownBy(()->repo.jdbc().update("INSERT INTO demo_money_events(id,kind,subject_id,payment_id,booking_id,facility_id,payee_id,amount,currency,outcome,performed_by,performed_at,command_key) VALUES(gen_random_uuid(),'POLICY_REFUND',?,?,?,?,?,1,'VND','SUCCESS',?,NOW(),'forged')",refund,b.paymentId(),b.id(),b.facilityId(),user.id(),owner.id())).isInstanceOf(org.springframework.dao.DataAccessException.class).hasMessageContaining("DEMO refund payee or allocation differs");
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM demo_money_events WHERE subject_id=?",Integer.class,refund)).isZero();
+ }
+ @Test void demoZeroRefundPolicyRecordsCancellationWithoutAMoneyEvent(){
+  when(dependencies.refundPolicy(any())).thenAnswer(a->policy(a.getArgument(0),0,1));var b=demoConfirmed();var owner=demoOwner();demoAcl(owner);var q=policyCancellation.quote(b.id(),user,"token");assertThat(q.get("targetAmount")).isEqualTo("0");
+  var cancelled=policyCancellation.cancel(b.id(),new BookingPolicyCancellation.Input((UUID)q.get("id"),"Zero policy"),key(),user,"token");UUID refund=(UUID)((Map<?,?>)cancelled.get("refund")).get("id");
+  assertThat(demoFinance.refund(refund,new BookingDemoFinance.Outcome("SUCCESS"),key(),owner,"token").get("state")).isEqualTo("NO_REFUND");assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM demo_money_events WHERE subject_id=?",Integer.class,refund)).isZero();
+ }
+ @Test void verifiedStaffCustomerKeepsOwnerQrAndPersonalBookingAfterOperationalAccessIsRevoked(){
+  scopedPermissions();var operator=counterStaff("BOOKING_CREATE_COUNTER","BOOKING_READ");var actor=new Caller(operator.id(),"Verified staff customer",Set.of("STAFF","CUSTOMER"),operator.facilityBindings());
+  when(dependencies.counterCustomer(any(),any(),any())).thenReturn(actor.id());var b=counterBooking(actor);consumer.apply(counterSuccess(b,actor.id(),UUID.randomUUID()));
+  var revoked=new Caller(actor.id(),actor.fullName(),actor.roles(),Map.of());
+  assertThat(service.detail(b.id(),revoked,"token").checkinToken()).isNotNull();assertThat(service.detail(b.id(),revoked,"token").booking().currentHolderId()).isEqualTo(actor.id());
+  assertThat(service.mine(revoked,"token")).extracting(Booking::id).contains(b.id());
+ }
 }

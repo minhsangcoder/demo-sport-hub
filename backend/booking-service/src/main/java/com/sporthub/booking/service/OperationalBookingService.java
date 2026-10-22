@@ -16,7 +16,7 @@ public class OperationalBookingService {
   var detail=bookings.detail(id,actor,token);var b=detail.booking();
   var guests=repo.jdbc().query("SELECT * FROM counter_booking_guests WHERE booking_id=?",(r,n)->new CounterGuest(id,r.getObject("operator_id",UUID.class),r.getObject("linked_customer_id",UUID.class),r.getString("guest_name"),r.getString("guest_phone"),r.getString("payment_capability")),id);
   CounterGuest guest=guests.isEmpty()?null:guests.getFirst();
-  if(guest!=null&&!actor.id().equals(b.createdBy())&&(actor.id().equals(b.customerId())||actor.id().equals(b.currentHolderId()))&&!actor.id().equals(guest.linkedCustomerId()))guest=null;
+  if(guest!=null&&!actor.id().equals(b.createdBy())&&!actor.id().equals(guest.linkedCustomerId())&&(Objects.equals(actor.id(),b.customerId())||Objects.equals(actor.id(),b.currentHolderId())||b.guestName()==null))guest=null;
   var states=repo.jdbc().query("SELECT * FROM booking_status_audit WHERE booking_id=? ORDER BY id",(r,n)->new StatusAudit(r.getLong("id"),r.getString("previous_status"),r.getString("status"),r.getObject("actor_id",UUID.class),r.getString("change_source"),r.getLong("booking_version"),r.getTimestamp("recorded_at").toInstant()),id);
   return new Operations(detail,guest,states);
  }
@@ -43,7 +43,8 @@ public class OperationalBookingService {
   }
   long total=repo.jdbc().queryForObject("SELECT count(*) FROM bookings b"+where,Long.class,args.toArray());
   var pageArgs=new ArrayList<>(args);pageArgs.add(input.size());pageArgs.add((long)input.page()*input.size());var items=repo.list("SELECT b.* FROM bookings b"+where+" ORDER BY b.starts_at DESC,b.id DESC LIMIT ? OFFSET ?",pageArgs.toArray());
-  if(input.facilityId()==null)items=items.stream().map(b->new Booking(b.id(),b.facilityId(),b.courtId(),b.customerId(),b.currentHolderId(),b.createdBy(),b.startsAt(),b.endsAt(),b.status(),b.source(),null,null,b.amount(),b.currency(),b.priceSnapshot(),b.holdExpiresAt(),b.paymentId(),b.paidAt(),b.checkedInAt(),b.completedAt(),b.version(),b.checkinTokenVersion(),b.currentHolderId().equals(actor.id())?b.bookingCode():null)).toList();
+  items=items.stream().map(bookings::projectEffective).toList();
+  if(input.facilityId()==null)items=items.stream().map(b->new Booking(b.id(),b.facilityId(),b.courtId(),b.customerId(),b.currentHolderId(),b.createdBy(),b.startsAt(),b.endsAt(),b.status(),b.source(),null,null,b.amount(),b.currency(),b.priceSnapshot(),b.holdExpiresAt(),b.paymentId(),b.paidAt(),b.checkedInAt(),b.completedAt(),b.version(),b.checkinTokenVersion(),Objects.equals(b.currentHolderId(),actor.id())?b.bookingCode():null)).toList();
   return new Page(items,total,input.page(),input.size(),(total+input.size()-1)/input.size());
  }
 }

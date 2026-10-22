@@ -42,6 +42,6 @@ export const businessApi = {
  sport:(body:{name:string;active:boolean;description?:string;icon?:string;expectedVersion?:number},id?:string)=>write<Sport>(`/admin/sport-categories${id?'/'+id:''}`,body,undefined,id?'PUT':'POST'),
  accountState:(id:string,state:'suspend'|'deactivate'|'reactivate',reason:string)=>write(`/admin/accounts/${id}/${state}`,{reason}),
  paymentRetry:(id:string)=>api(`/payments/${id}/synchronization/retry`,{method:'POST'}),
- counter:(body:{courtId:string;startsAt:string;endsAt:string;expectedAmount:number;guestName:string;guestPhone:string;paymentMethod:'DEMO'},key:string)=>write<Booking>('/bookings/counter',body,key),
+ counter:(body:{courtId:string;startsAt:string;endsAt:string;expectedAmount:number;guestName:string;guestPhone:string;paymentMethod:'DEMO';refundPolicyHash:string},key:string)=>write<Booking>('/bookings/counter',body,key),
  pay:(bookingId:string,key:string,memberId?:string)=>write<Payment>('/payments',{bookingId,memberId,provider:'DEMO'},key),
 }

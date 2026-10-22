@@ -32,6 +32,16 @@ REDIS = os.environ.get('SPORTHUB_E2E_REDIS_CONTAINER', 'sporthub-phase01-redis')
 REDIS_PORT = os.environ.get('SPORTHUB_E2E_REDIS_PORT', '52386')
 JAVA = os.environ.get('SPORTHUB_E2E_JAVA', 'C:/Program Files/Java/jdk-21.0.10/bin/java.exe')
 NODE = os.environ['SPORTHUB_E2E_NODE']
+TEST_SCRIPT = os.environ.get('SPORTHUB_E2E_TEST_SCRIPT', 'system-e2e.mjs')
+if TEST_SCRIPT not in ['system-e2e.mjs', 'counter-booking-ownership-e2e.mjs', 'demo-finance-e2e.mjs']:
+    raise RuntimeError('Choose a checked-in system test harness')
+OWNERSHIP_TEST = TEST_SCRIPT == 'counter-booking-ownership-e2e.mjs'
+DEMO_FINANCE_TEST = TEST_SCRIPT == 'demo-finance-e2e.mjs'
+ARTIFACT_ROOT = Path(os.environ.get('SPORTHUB_E2E_ARTIFACT_ROOT', str(ROOT / 'backend'))).resolve()
+FRONTEND_ROOT = Path(os.environ.get('SPORTHUB_E2E_FRONTEND_ROOT', str(ROOT / 'frontend'))).resolve()
+ARTIFACT_SUFFIX = os.environ.get('SPORTHUB_E2E_ARTIFACT_SUFFIX', '')
+if not re.fullmatch(r'[-\w]*', ARTIFACT_SUFFIX):
+    raise RuntimeError('Invalid test artifact suffix')
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 processes, streams, containers, codes = [], [], [], {}
 
@@ -104,7 +114,8 @@ class SMTP(socketserver.StreamRequestHandler):
             text = line.decode().strip()
             if text.upper().startswith('RCPT TO'):
                 recipient = re.search(r'<([^>]+)>', text).group(1)
-                if not recipient.endswith('@phase12.invalid'):
+                synthetic_sms = (OWNERSHIP_TEST or DEMO_FINANCE_TEST) and re.fullmatch(r'849[0-9]{8}@sms\.sporthub\.local', recipient)
+                if not recipient.endswith('@phase12.invalid') and not synthetic_sms:
                     self.wfile.write(b'550 Test recipients only\r\n')
                     continue
             if text.upper() == 'DATA':
@@ -177,7 +188,7 @@ def main():
                     'SPRING_RABBITMQ_USERNAME':'phase12_test', 'SPRING_RABBITMQ_PASSWORD':'phase12_synthetic_only',
                     'SPRING_RABBITMQ_VIRTUAL_HOST':'phase12', 'DEMO_SEED_ENABLED':'false',
                     'JWT_SECRET':'phase12-synthetic-jwt-secret-over-thirty-two-characters',
-                    'JWT_ACCESS_TOKEN_EXPIRATION':'45000', 'SERVICE_CALL_SECRET':'phase12-synthetic-service-secret-over-thirty-two-characters',
+                    'JWT_ACCESS_TOKEN_EXPIRATION':'600000' if DEMO_FINANCE_TEST else '45000', 'SERVICE_CALL_SECRET':'phase12-synthetic-service-secret-over-thirty-two-characters',
                     'OWNER_APPLICATION_DATA_KEY':base64.b64encode(os.urandom(32)).decode(),
                     'REDIS_HOST':'127.0.0.1', 'REDIS_PORT':REDIS_PORT, 'REDIS_PASSWORD':'', 'SPRING_DATA_REDIS_PASSWORD':'',
                     'SPORTHUB_MEDIA_ACCESS_KEY':'phase12_test', 'SPORTHUB_MEDIA_SECRET_KEY':'phase12_synthetic_only',
@@ -186,11 +197,14 @@ def main():
                     'SPRING_MAIL_HOST':'127.0.0.1', 'SPRING_MAIL_PORT':str(smtp.server_address[1]),
                     'SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH':'false', 'SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE':'false',
                     'FRONTEND_BASE_URL':f'http://127.0.0.1:{ports["frontend"]}', 'APP_PUBLIC_URL':f'http://127.0.0.1:{ports["frontend"]}',
-                    'SECURE_COOKIE':'false', 'DEMO_SMS_ENABLED':'false', 'GROUP_MIN_LEAD_SECONDS':'180',
+                    'SECURE_COOKIE':'false', 'DEMO_SMS_ENABLED':'true' if OWNERSHIP_TEST or DEMO_FINANCE_TEST else 'false', 'GROUP_MIN_LEAD_SECONDS':'180',
                     'GROUP_PAYMENT_DEADLINE_SECONDS':'180', 'SPORTHUB_EVENTS_OUTBOX_DELAY_MS':'300',
                     'DEMO_PAYMENT_CALLBACK_SECRET':'phase12-demo-callback-secret-over-thirty-two-characters',
                     'CORS_ALLOWED_ORIGIN':f'http://127.0.0.1:{ports["frontend"]}',
                     'GATEWAY_RATE_LIMIT_REPLENISH_RATE':'200', 'GATEWAY_RATE_LIMIT_BURST_CAPACITY':'400'})
+        if DEMO_FINANCE_TEST:
+            env['TRANSFER_ACQUISITION_SECONDS'] = '45'
+            env['TRANSFER_FINANCE_ENABLED'] = 'true'
         for name in SERVICES:
             env[name.upper() + '_SERVICE_URL'] = f'http://127.0.0.1:{ports[name]}'
         running = {}
@@ -200,21 +214,24 @@ def main():
             child['SPRING_PROFILES_ACTIVE'] = 'local' if name == 'payment' else 'default'
             if name != 'gateway':
                 child['SPRING_DATASOURCE_URL'] = f'jdbc:postgresql://127.0.0.1:{PG_PORT}/{dbs[name]}'
-            running[name] = spawn([JAVA, '-Xmx256m', '-jar', str(ROOT / 'backend' / module / 'target' / (module+'-0.0.1-SNAPSHOT.jar'))], child, name)
+            running[name] = spawn([JAVA, '-Xmx256m', '-jar', str(ARTIFACT_ROOT / module / 'target' / (module+'-0.0.1-SNAPSHOT'+ARTIFACT_SUFFIX+'.jar'))], child, name)
         for name, process in running.items():
             wait_url(f'http://127.0.0.1:{ports[name]}/actuator/health/liveness', process)
             print('Ready:', name, flush=True)
         frontend_env = dict(env, GATEWAY_URL=f'http://127.0.0.1:{ports["gateway"]}', NEXT_TELEMETRY_DISABLED='1', PORT=str(ports['frontend']), HOSTNAME='127.0.0.1')
-        standalone=ROOT/'frontend/.next/standalone'
-        shutil.copytree(ROOT/'frontend/.next/static',standalone/'.next/static',dirs_exist_ok=True)
-        shutil.copytree(ROOT/'frontend/public',standalone/'public',dirs_exist_ok=True)
-        frontend = spawn([NODE, str(standalone/'server.js')], frontend_env, 'frontend-runtime')
+        standalone=FRONTEND_ROOT/'.next/standalone'
+        runtime = standalone if (standalone/'server.js').is_file() else standalone/FRONTEND_ROOT.name
+        if not (runtime/'server.js').is_file():
+            raise RuntimeError('Standalone frontend server is missing: '+str(runtime))
+        shutil.copytree(FRONTEND_ROOT/'.next/static',runtime/'.next/static',dirs_exist_ok=True)
+        shutil.copytree(FRONTEND_ROOT/'public',runtime/'public',dirs_exist_ok=True)
+        frontend = spawn([NODE, str(runtime/'server.js')], frontend_env, 'frontend-runtime')
         wait_url(f'http://127.0.0.1:{ports["frontend"]}', frontend)
         config = {'run':RUN, 'ports':ports, 'databases':dbs, 'pg':PG, 'pgUser':PG_USER, 'output':str(OUT), 'baseURL':f'http://127.0.0.1:{ports["frontend"]}', 'pids':[p.pid for p in processes], 'containers':containers}
         (OUT/'runtime.json').write_text(json.dumps(config, indent=2), encoding='utf-8')
         print('Ready: frontend; genuine BFF/Gateway integration', flush=True)
         with (OUT/'browser-api.log').open('w', encoding='utf-8') as log:
-            result = subprocess.run([NODE, str(ROOT/'frontend/tests/system-e2e.mjs'), str(OUT/'runtime.json')], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
+            result = subprocess.run([NODE, str(ROOT/'frontend/tests'/TEST_SCRIPT), str(OUT/'runtime.json')], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
         print((OUT/'browser-api.log').read_text(encoding='utf-8'), flush=True)
         return result.returncode
     finally:

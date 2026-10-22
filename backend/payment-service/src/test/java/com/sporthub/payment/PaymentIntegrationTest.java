@@ -22,7 +22,7 @@ import java.util.*;
 
 @SpringBootTest(properties={"spring.profiles.active=local","DEMO_SEED_ENABLED=false","spring.rabbitmq.username=test","spring.rabbitmq.password=test",
  "spring.rabbitmq.listener.simple.auto-startup=false","SERVICE_CALL_SECRET=synthetic-wallet-test-key-over-thirty-two-characters",
- "sporthub.payment.demo.callback-secret=local-callback-key-longer-than-thirty-two-characters","sporthub.events.outbox.delay-ms=3600000","sporthub.payment.expiry-delay-ms=3600000","sporthub.payment.sync.delay-ms=3600000"})
+ "sporthub.payment.demo.callback-secret=local-callback-key-longer-than-thirty-two-characters","sporthub.events.outbox.delay-ms=3600000","sporthub.payment.expiry-delay-ms=3600000","sporthub.payment.sync.delay-ms=3600000","sporthub.finance.movements.delay-ms=3600000"})
 @org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 class PaymentIntegrationTest {
  static PostgreSQLContainer<?> postgres;
@@ -34,11 +34,171 @@ class PaymentIntegrationTest {
  @Autowired TransferRefundConsumer transferRefunds;
  @Autowired com.sporthub.payment.web.InternalOwnerWalletController wallets;
  @Autowired com.sporthub.payment.web.PaymentMonitoringController monitoring;
+ @Autowired SellerPayoutAccounts sellerAccounts;
+ @Autowired PaymentReportFacts reportFacts;
+ @Autowired TransferSettlementService settlements;
+ @Autowired MovementExecutions movements;
+ @Autowired DemoMovementProvider movementProvider;
+ @Autowired FinancialLedger ledger;
  @MockBean com.sporthub.common.security.RemoteIdentity identity;
  @MockBean PayableClient payable;@MockBean java.time.Clock clock;@MockBean BookingReceiptClient receipts;@Autowired PaymentSynchronization synchronization;@org.springframework.boot.test.mock.mockito.SpyBean ReliableOutbox outbox;
  Caller user;UUID booking;Instant testNow;
  @BeforeEach void setup(){testNow=Instant.now();when(clock.instant()).thenReturn(testNow);when(clock.getZone()).thenReturn(java.time.ZoneOffset.UTC);user=new Caller(UUID.randomUUID(),"Customer",Set.of("CUSTOMER"),Map.of());booking=UUID.randomUUID();when(payable.payable(eq(booking),isNull(),any())).thenReturn(json.valueToTree(Map.of("bookingId",booking,"payerId",user.id(),"amount",150000,"currency","VND","expiresAt",testNow.plusSeconds(600),"purpose","BOOKING")));}
  String key(){return UUID.randomUUID().toString();}
+ record FinancialBill(UUID acquisition,com.fasterxml.jackson.databind.node.ObjectNode bill,com.fasterxml.jackson.databind.node.ObjectNode terms){}
+ FinancialBill financialBill(){
+  var seller=new Caller(UUID.randomUUID(),"Seller A",Set.of("CUSTOMER"),Map.of());UUID acquisition=UUID.randomUUID(),facility=UUID.randomUUID(),court=UUID.randomUUID();
+  var destination=sellerAccounts.register(new SellerPayoutAccounts.Input(null,"DEMO","DEMO destination 1234","Seller consents to a demo payout destination"),key(),seller);
+  var beneficiary=json.valueToTree(sellerAccounts.verified(destination.id(),seller.id()));
+  var policy=json.valueToTree(Map.of("configured",true,"id",UUID.randomUUID(),"version",1,"rateBps",8000,"currency","VND","rounding","HALF_UP","termsHash",com.sporthub.common.security.Signatures.sha256(facility+"|1|8000|VND|HALF_UP|FACILITY_POLICY_CANCELLATION")));
+  var expires=testNow.plusSeconds(600).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+  var quote=com.sporthub.common.money.TransferFinancialTerms.seller(json,booking,facility,court,seller.id(),new BigDecimal("100000"),expires.plusSeconds(3600),beneficiary,policy);
+  var terms=com.sporthub.common.money.TransferFinancialTerms.acquisition(quote,UUID.randomUUID(),1,acquisition,user.id(),expires,testNow.truncatedTo(java.time.temporal.ChronoUnit.MICROS));
+  var bill=json.createObjectNode().put("bookingId",booking.toString()).put("payerId",user.id().toString()).put("sellerId",seller.id().toString()).put("acquisitionId",acquisition.toString()).put("purpose","TRANSFER").put("amount",100000).put("currency","VND").put("expiresAt",expires.toString());bill.set("transferTerms",terms);
+  when(payable.transfer(eq(acquisition),any())).thenReturn(bill);return new FinancialBill(acquisition,bill,terms);
+ }
+ FinancialBill demoBill(){
+  UUID acquisition=UUID.randomUUID(),facility=UUID.randomUUID(),court=UUID.randomUUID(),seller=UUID.randomUUID(),owner=UUID.randomUUID();
+  var expires=testNow.plusSeconds(600).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+  var source=json.createObjectNode().put("id",booking.toString()).put("facilityId",facility.toString()).put("courtId",court.toString());
+  source.set("refundPolicy",json.valueToTree(Map.of("configured",true,"id",UUID.randomUUID(),"version",1,"rateBps",8000,"currency","VND","rounding","HALF_UP","termsHash",com.sporthub.common.security.Signatures.sha256(facility+"|1|8000|VND|HALF_UP|FACILITY_POLICY_CANCELLATION"))));
+  var receiver=json.createObjectNode().put("id",facility.toString()).put("ownerId",owner.toString()).put("name","Demo receiving facility");
+  var fee=json.createObjectNode().put("configured",true).put("feeBps",500).put("version",1).put("termsHash",com.sporthub.common.security.Signatures.sha256(facility+"|1|500|VND|HALF_UP|FACILITY_TRANSFER_FEE"));
+  var sellerTerms=com.sporthub.common.money.DemoTransferTerms.seller(json,source,receiver,fee,seller,new BigDecimal("100000"),expires.plusSeconds(3600));
+  var terms=com.sporthub.common.money.TransferFinancialTerms.acquisition(sellerTerms,UUID.randomUUID(),1,acquisition,user.id(),expires,testNow.truncatedTo(java.time.temporal.ChronoUnit.MICROS));
+  var bill=json.createObjectNode().put("bookingId",booking.toString()).put("payerId",user.id().toString()).put("sellerId",seller.toString()).put("acquisitionId",acquisition.toString()).put("purpose","TRANSFER").put("amount",100000).put("currency","VND").put("expiresAt",expires.toString());bill.set("transferTerms",terms);
+  when(payable.transfer(eq(acquisition),any())).thenReturn(bill);return new FinancialBill(acquisition,bill,terms);
+ }
+ @Test void demoTransferPaymentCapturesFacilityTermsWithoutAnyBankSetupAndEmitsCanonicalHandoff(){
+  var f=demoBill();String request=key();var input=new CreatePayment(booking,null,f.acquisition());var p=service.create(input,request,user,"token");
+  var stored=repo.jdbc().queryForObject("SELECT snapshot::text FROM demo_transfer_payment_terms WHERE payment_id=?",String.class,p.id());
+  assertThat(stored).contains(f.terms().path("receiverOwnerId").asText()).doesNotContain("beneficiaryRevisionId");
+  assertThat(service.create(input,request,user,"token").id()).isEqualTo(p.id());
+  var completed=callback(p,"SUCCESS");service.callback(completed,provider.sign(completed));assertThat(repo.find(p.id()).status()).isEqualTo("SUCCESS");
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM transfer_escrow WHERE payment_id=?",Integer.class,p.id())).isZero();
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM transfer_settlements WHERE payment_id=?",Integer.class,p.id())).isZero();
+  var events=repo.jdbc().queryForList("SELECT body::text FROM event_outbox WHERE body->'payload'->>'paymentId'=?",String.class,p.id().toString());
+  assertThat(events).anySatisfy(e->assertThat(e).contains("transfer.collection.verified").contains(f.terms().path("termsHash").asText()));
+  assertThat(events).anySatisfy(e->assertThat(e).contains("payment.completed").contains("transferTerms").contains("DEMO"));
+  assertThatThrownBy(()->repo.jdbc().update("UPDATE demo_transfer_payment_terms SET snapshot='{}'::jsonb WHERE payment_id=?",p.id())).isInstanceOf(org.springframework.dao.DataAccessException.class);
+ }
+ @Test void demoTransferRejectsTamperedServerBindingAndFailedCollectionNeverStartsHandoff(){
+  var f=demoBill();f.bill().put("amount",1);
+  assertThatThrownBy(()->service.create(new CreatePayment(booking,null,f.acquisition()),key(),user,"token")).isInstanceOf(ConflictException.class);
+  f.bill().put("amount",100000);var p=service.create(new CreatePayment(booking,null,f.acquisition()),key(),user,"token");
+  var failed=callback(p,"FAILED");service.callback(failed,provider.sign(failed));
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM event_outbox WHERE routing_key='transfer.collection.verified' AND body->'payload'->>'paymentId'=?",Integer.class,p.id().toString())).isZero();
+ }
+ @Test void financialTermsCaptureServerAcquisitionAndReplayKeepsTheAcceptedSnapshot(){
+  var f=financialBill();String request=key();var input=new CreatePayment(booking,null,f.acquisition());var p=service.create(input,request,user,"token");
+  var stored=repo.jdbc().queryForMap("SELECT * FROM transfer_payment_terms WHERE payment_id=?",p.id());assertThat(stored.get("terms_hash")).isEqualTo(f.terms().path("termsHash").asText());assertThat((BigDecimal)stored.get("quoted_fee_amount")).isEqualByComparingTo("2000");assertThat((BigDecimal)stored.get("quoted_seller_net_amount")).isEqualByComparingTo("98000");
+  assertThat(service.create(input,request,user,"token").id()).isEqualTo(p.id());assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM transfer_payment_terms WHERE payment_id=?",Integer.class,p.id())).isEqualTo(1);
+ }
+ @Test void financialTermsRejectMalformedOrDifferentBuyerWithoutLeavingAnOrder(){
+  var f=financialBill();f.terms().put("quotedFeeAmount","0");assertThatThrownBy(()->service.create(new CreatePayment(booking,null,f.acquisition()),key(),user,"token")).isInstanceOf(ConflictException.class);
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM payment_orders WHERE booking_id=?",Integer.class,booking)).isZero();
+ }
+ @Test void financialTermsIgnoreForgedBrowserFeeSellerAndDestinationFields()throws Exception{
+  var f=financialBill();when(identity.current(any())).thenReturn(user);
+  String body=json.writeValueAsString(Map.of("bookingId",booking,"acquisitionId",f.acquisition(),"feeBps",0,"sellerNetAmount","100000","sellerId",UUID.randomUUID(),"beneficiaryRevisionId",UUID.randomUUID()));
+  http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/payments").contentType("application/json").header("Idempotency-Key",key()).header("Authorization","Bearer fixture-token").content(body)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isCreated());
+  assertThat(repo.jdbc().queryForObject("SELECT quoted_fee_amount FROM transfer_payment_terms WHERE booking_id=?",BigDecimal.class,booking)).isEqualByComparingTo("2000");
+  assertThat(repo.jdbc().queryForObject("SELECT buyer_id FROM transfer_payment_terms WHERE booking_id=?",UUID.class,booking)).isEqualTo(user.id());
+ }
+ @Test void financialCollectionCreatesOneCanonicalProofAndHoldsFundsWithoutEarningFeeBeforeHandoff(){
+  var f=financialBill();var p=service.create(new CreatePayment(booking,null,f.acquisition()),key(),user,"token");var callback=callback(p,"SUCCESS");service.callback(callback,provider.sign(callback));service.callback(callback,provider.sign(callback));
+  assertThat(repo.jdbc().queryForObject("SELECT state FROM transfer_settlements WHERE payment_id=?",String.class,p.id())).isEqualTo("WAITING_HANDOFF");
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM verified_payment_collections WHERE payment_id=? AND canonical AND money_class='DEMO'",Integer.class,p.id())).isEqualTo(1);
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM financial_journals WHERE payment_id=?",Integer.class,p.id())).isEqualTo(2);
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM money_movement_orders WHERE payment_id=?",Integer.class,p.id())).isZero();
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM event_outbox WHERE body->>'eventType'='transfer.collection.verified' AND body->'payload'->>'paymentId'=?",Integer.class,p.id().toString())).isEqualTo(1);
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM financial_postings p JOIN financial_accounts a ON a.id=p.account_id JOIN financial_journals j ON j.id=p.journal_id WHERE j.payment_id=? AND a.kind='TRANSFER_FEE_REVENUE'",Integer.class,p.id())).isZero();
+ }
+ @Test void financialCollectionTwoSuccessesSettleOnlyOneCanonicalPaymentAndKeepExtraFundsSeparate(){
+  var f=financialBill();var input=new CreatePayment(booking,null,f.acquisition());var first=service.create(input,key(),user,"token");
+  // Simulate the first provider order expiring early while the acquisition remains payable.
+  repo.jdbc().update("UPDATE payment_orders SET status='EXPIRED' WHERE id=?",first.id());var second=service.create(input,key(),user,"token");
+  for(var p:List.of(second,first)){var callback=callback(p,"SUCCESS");service.callback(callback,provider.sign(callback));}
+  assertThat(repo.jdbc().queryForObject("SELECT payment_id FROM transfer_settlements WHERE acquisition_id=?",UUID.class,f.acquisition())).isEqualTo(second.id());
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM verified_payment_collections WHERE acquisition_id=? AND canonical",Integer.class,f.acquisition())).isEqualTo(1);
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM event_outbox WHERE body->>'eventType'='transfer.collection.verified' AND body->'payload'->>'acquisitionId'=?",Integer.class,f.acquisition().toString())).isEqualTo(1);
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM financial_journals WHERE payment_id IN(?,?)",Integer.class,first.id(),second.id())).isEqualTo(4);
+ }
+ com.fasterxml.jackson.databind.JsonNode completedEvent(FinancialBill f,Payment original){
+  var p=repo.find(original.id());var terms=f.terms();String hash=com.sporthub.common.money.TransferHandoff.fingerprint(UUID.fromString(terms.path("listingId").asText()),booking,p.sellerId(),f.acquisition(),p.payerId(),p.id(),p.amount(),p.currency(),p.paidAt(),Instant.parse(terms.path("expiresAt").asText()),Instant.parse(terms.path("deadline").asText()));
+  var payload=json.createObjectNode();for(String field:List.of("acquisitionId","listingId","bookingId","facilityId","courtId","sellerId","buyerId","termsHash","amount","currency"))payload.set(field,terms.path(field));
+  payload.put("amount",p.amount());var handed=testNow.plusSeconds(2).truncatedTo(java.time.temporal.ChronoUnit.MICROS);payload.put("paymentId",p.id().toString());payload.put("commandFingerprint",hash);payload.put("handoffAt",handed.toString());payload.put("bookingVersion",3);payload.put("decisionRef",f.acquisition().toString());
+  var decision=payload.deepCopy();decision.put("origin","ACQUISITION_DECISION");decision.put("decision","COMPLETED");decision.put("decidedAt",handed.toString());doReturn(decision).when(receipts).acquisitionDecision(f.acquisition());
+  return json.valueToTree(com.sporthub.common.event.DomainEvent.create("transfer.handoff.completed",1,"transfer-service",f.acquisition(),payload));
+ }
+ @Test void financialHandoffAllocatesFeeAndSellerDebtExactlyOnceBeforePlay(){
+  var f=financialBill();var p=service.create(new CreatePayment(booking,null,f.acquisition()),key(),user,"token");var callback=callback(p,"SUCCESS");service.callback(callback,provider.sign(callback));
+  var event=completedEvent(f,p);settlements.completed(event);settlements.completed(event);
+  assertThat(repo.jdbc().queryForObject("SELECT state FROM transfer_settlements WHERE payment_id=?",String.class,p.id())).isEqualTo("ALLOCATED");
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM financial_journals WHERE payment_id=? AND effect_type='TRANSFER_ALLOCATION'",Integer.class,p.id())).isEqualTo(1);
+  var order=repo.jdbc().queryForMap("SELECT * FROM money_movement_orders WHERE payment_id=?",p.id());assertThat(order.get("state")).isEqualTo("NEW");assertThat((BigDecimal)order.get("amount")).isEqualByComparingTo("98000");assertThat(order.get("payee_id")).isEqualTo(p.sellerId());
+  assertThat(repo.jdbc().queryForObject("SELECT sum(l.amount) FROM financial_postings l JOIN financial_accounts a ON a.id=l.account_id JOIN financial_journals j ON j.id=l.journal_id WHERE j.payment_id=? AND a.kind='TRANSFER_FEE_REVENUE' AND l.side='C'",BigDecimal.class,p.id())).isEqualByComparingTo("2000");
+ }
+ @Test void financialHandoffRejectsWrongDecisionAndDoesNotAllocateWhileBookingIsUnavailable(){
+  var f=financialBill();var p=service.create(new CreatePayment(booking,null,f.acquisition()),key(),user,"token");var callback=callback(p,"SUCCESS");service.callback(callback,provider.sign(callback));var event=completedEvent(f,p);
+  var bad=((com.fasterxml.jackson.databind.node.ObjectNode)event).deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)bad.path("payload")).put("commandFingerprint","0".repeat(64));assertThatThrownBy(()->settlements.completed(bad)).isInstanceOf(ConflictException.class);
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM money_movement_orders WHERE payment_id=?",Integer.class,p.id())).isZero();
+  when(receipts.acquisitionDecision(f.acquisition())).thenThrow(new BookingReceiptClient.Unavailable());assertThatThrownBy(()->settlements.completed(event)).isInstanceOf(BookingReceiptClient.Unavailable.class);
+  assertThat(repo.jdbc().queryForObject("SELECT state FROM transfer_settlements WHERE payment_id=?",String.class,p.id())).isEqualTo("WAITING_HANDOFF");
+  settlements.completed(completedEvent(f,p));
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM money_movement_orders WHERE payment_id=?",Integer.class,p.id())).isEqualTo(1);
+ }
+ UUID payoutOrder(){var f=financialBill();var p=service.create(new CreatePayment(booking,null,f.acquisition()),key(),user,"token");var callback=callback(p,"SUCCESS");service.callback(callback,provider.sign(callback));settlements.completed(completedEvent(f,p));return repo.jdbc().queryForObject("SELECT id FROM money_movement_orders WHERE payment_id=?",UUID.class,p.id());}
+ MovementProvider.Command movementCommand(UUID attempt)throws Exception{return json.readValue(repo.jdbc().queryForObject("SELECT request_body::text FROM money_movement_attempts WHERE id=?",String.class,attempt),MovementProvider.Command.class);}
+ String movementState(UUID order){return repo.jdbc().queryForObject("SELECT state FROM money_movement_orders WHERE id=?",String.class,order);}
+ @Test void movementTwoWorkersReserveOneAttemptAndEarlyFinalCallbackCannotBePaidTwice()throws Exception{
+  UUID order=payoutOrder();var go=new java.util.concurrent.CountDownLatch(1);var attempts=new ArrayList<UUID>();
+  try(var workers=java.util.concurrent.Executors.newFixedThreadPool(2)){var jobs=new ArrayList<java.util.concurrent.Future<Optional<UUID>>>();for(int i=0;i<2;i++)jobs.add(workers.submit(()->{go.await();return movements.claim(order);}));go.countDown();for(var job:jobs)attempts.add(job.get().orElseThrow());}
+  assertThat(attempts.getFirst()).isEqualTo(attempts.getLast());UUID attempt=attempts.getFirst();var command=movementCommand(attempt);var early=movementProvider.submit(command);movements.accept(early,"WEBHOOK");movements.accept(early,"WEBHOOK");movements.dispatch(attempt,true);
+  assertThat(movementState(order)).isEqualTo("SUCCEEDED");assertThat(repo.jdbc().queryForObject("SELECT executed_total FROM money_movement_orders WHERE id=?",BigDecimal.class,order)).isEqualByComparingTo("98000");
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM money_movement_attempts WHERE order_id=?",Integer.class,order)).isEqualTo(1);assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM demo_provider_movement_commands WHERE order_id=?",Integer.class,order)).isEqualTo(1);
+  assertThat(repo.jdbc().queryForObject("SELECT remaining_amount FROM financial_funding_reservations WHERE attempt_id=?",BigDecimal.class,attempt)).isZero();assertThat(movements.claim(order)).isEmpty();
+ }
+ @Test void movementUnknownAfterBankFinalQueriesOriginalKeyWithoutAnotherDebit()throws Exception{
+  UUID order=payoutOrder(),attempt=movements.claim(order).orElseThrow();movementProvider.fault(order,DemoMovementProvider.Fault.TIMEOUT_AFTER_SUCCESS);movements.dispatch(attempt,true);
+  assertThat(movementState(order)).isEqualTo("UNKNOWN");assertThat(movements.claim(order)).contains(attempt);
+  when(clock.instant()).thenReturn(testNow.plusSeconds(41));movements.dispatch(attempt,true);assertThat(movementState(order)).isEqualTo("SUCCEEDED");
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM demo_provider_movement_commands WHERE order_id=?",Integer.class,order)).isEqualTo(1);assertThat(repo.jdbc().queryForObject("SELECT submit_count FROM money_movement_attempts WHERE id=?",Integer.class,attempt)).isEqualTo(1);
+ }
+ @Test void movementAcceptedDebitAndFinalAreDifferentAndOnlyReturnedAmountCanBeRetried()throws Exception{
+  UUID order=payoutOrder(),attempt=movements.claim(order).orElseThrow();var command=movementCommand(attempt);movementProvider.fault(order,DemoMovementProvider.Fault.ACCEPT_ONLY);movements.dispatch(attempt,true);
+  assertThat(movementState(order)).isEqualTo("PROCESSING");assertThat(repo.jdbc().queryForObject("SELECT executed_total FROM money_movement_orders WHERE id=?",BigDecimal.class,order)).isZero();
+  var debit=movementProvider.event(command,"DEBITED",new BigDecimal("98000"),key());movements.accept(debit,"WEBHOOK");assertThat(movementState(order)).isEqualTo("PROCESSING");
+  var finalProof=movementProvider.event(command,"FINAL",new BigDecimal("98000"),key());movements.accept(finalProof,"WEBHOOK");movements.accept(debit,"QUERY");assertThat(movementState(order)).isEqualTo("SUCCEEDED");
+  var available=movementProvider.event(command,"RETURN_AVAILABLE",new BigDecimal("20000"),key());movements.accept(available,"WEBHOOK");assertThat(movementState(order)).isEqualTo("SUCCEEDED");
+  var returned=movementProvider.event(command,"RETURN",new BigDecimal("20000"),key());movements.accept(returned,"WEBHOOK");movements.accept(returned,"QUERY");assertThat(movementState(order)).isEqualTo("RETURNED");
+  var second=movements.claim(order).orElseThrow();assertThat(movementCommand(second).amount()).isEqualByComparingTo("20000");movementProvider.fault(order,DemoMovementProvider.Fault.SUCCESS);movements.dispatch(second,true);
+  assertThat(movementState(order)).isEqualTo("SUCCEEDED");assertThat(repo.jdbc().queryForObject("SELECT executed_total-returned_total FROM money_movement_orders WHERE id=?",BigDecimal.class,order)).isEqualByComparingTo("98000");
+  assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM financial_journals WHERE movement_id=? AND effect_type='MOVEMENT_FINAL'",Integer.class,order)).isEqualTo(2);
+ }
+ @Test void movementDefiniteFailureRestoresDebtAndForgedProofCannotReleaseReservation()throws Exception{
+  UUID order=payoutOrder(),attempt=movements.claim(order).orElseThrow();var command=movementCommand(attempt);movementProvider.fault(order,DemoMovementProvider.Fault.FAIL_NO_OUTFLOW);movements.dispatch(attempt,true);assertThat(movementState(order)).isEqualTo("FAILED_RETRYABLE");
+  UUID retry=movements.claim(order).orElseThrow();assertThat(retry).isNotEqualTo(attempt);var second=movementCommand(retry);movementProvider.fault(order,DemoMovementProvider.Fault.ACCEPT_ONLY);movements.dispatch(retry,true);var proof=movementProvider.event(second,"FINAL",second.amount(),key());
+  var fake=new MovementProvider.Event(proof.provider(),proof.account(),proof.region(),proof.eventId(),proof.reference(),proof.orderId(),proof.attemptId(),proof.kind(),proof.amount(),proof.currency(),proof.counterparty(),proof.occurredAt(),"forged");assertThatThrownBy(()->movements.accept(fake,"WEBHOOK")).isInstanceOf(ForbiddenException.class);
+  assertThat(movementState(order)).isEqualTo("PROCESSING");assertThat(repo.jdbc().queryForObject("SELECT remaining_amount FROM financial_funding_reservations WHERE attempt_id=?",BigDecimal.class,retry)).isEqualByComparingTo("98000");
+  movements.accept(proof,"WEBHOOK");assertThat(movementState(order)).isEqualTo("SUCCEEDED");
+ }
+ @Test void reportFactsVerifyCallbackCanonicalOutcomeAndNeverMutateSyncOutboxOrMoney(){
+  var p=service.create(new CreatePayment(booking,null),key(),user,"token");var callback=callback(p,"SUCCESS");service.callback(callback,provider.sign(callback));
+  var input=new com.sporthub.common.money.PaymentProofFacts.Request(List.of(new com.sporthub.common.money.PaymentProofFacts.Binding(p.id(),booking,null,"BOOKING")));
+  String before=repo.jdbc().queryForObject("SELECT to_jsonb(s)::text FROM payment_booking_sync s WHERE payment_id=?",String.class,p.id());int events=repo.jdbc().queryForObject("SELECT count(*) FROM event_outbox",Integer.class);
+  var result=reportFacts.read(input);var fact=result.facts().getFirst();assertThat(fact.verified()).isTrue();assertThat(fact.canonical()).isTrue();assertThat(fact.moneyClass()).isEqualTo("DEMO");assertThat(fact.amount()).isEqualTo("150000.00");assertThat(fact.proofSource()).isEqualTo("VERIFIED_COLLECTION");
+  assertThat(repo.jdbc().queryForObject("SELECT to_jsonb(s)::text FROM payment_booking_sync s WHERE payment_id=?",String.class,p.id())).isEqualTo(before);assertThat(repo.jdbc().queryForObject("SELECT count(*) FROM event_outbox",Integer.class)).isEqualTo(events);
+  var mismatch=reportFacts.read(new com.sporthub.common.money.PaymentProofFacts.Request(List.of(new com.sporthub.common.money.PaymentProofFacts.Binding(p.id(),UUID.randomUUID(),null,"BOOKING"))));assertThat(mismatch.facts()).isEmpty();assertThat(mismatch.problems().getFirst().reason()).isEqualTo("BINDING_MISMATCH");
+ }
+ @Test void reportFactsRequireServiceSignatureAndRejectMoreThanFiveHundredBindings()throws Exception{
+  String path="/api/v1/internal/payments/report-facts";var bindings=new ArrayList<com.sporthub.common.money.PaymentProofFacts.Binding>();for(int i=0;i<501;i++)bindings.add(new com.sporthub.common.money.PaymentProofFacts.Binding(UUID.randomUUID(),UUID.randomUUID(),null,"BOOKING"));
+  String body=json.writeValueAsString(new com.sporthub.common.money.PaymentProofFacts.Request(bindings));long timestamp=Instant.now().getEpochSecond();
+  http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path).contentType("application/json").header("Authorization","Bearer browser-token").content(body)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+  http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path).contentType("application/json").header("X-Service-Time",timestamp).header("X-Service-Signature",com.sporthub.common.security.ServiceCalls.sign("synthetic-wallet-test-key-over-thirty-two-characters","POST",path,timestamp,body)).content(body)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
+  body=json.writeValueAsString(new com.sporthub.common.money.PaymentProofFacts.Request(bindings.subList(0,1)));String valid=body;
+  http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path).contentType("application/json").header("X-Service-Time",timestamp).header("X-Service-Signature",com.sporthub.common.security.ServiceCalls.sign("synthetic-wallet-test-key-over-thirty-two-characters","POST",path,timestamp,valid)).content(valid)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
+ }
  Callback callback(Payment p,String status){return new Callback(p.id(),p.providerReference(),"TX-"+p.id(),p.amount(),p.currency(),status,clock.instant().getEpochSecond());}
  private org.springframework.mock.web.MockHttpServletRequest walletRequest(String body,boolean valid){
   var r=new org.springframework.mock.web.MockHttpServletRequest("POST","/api/v1/internal/owner-wallets/prepare");long time=Instant.now().getEpochSecond();r.addHeader("X-Service-Time",Long.toString(time));r.addHeader("X-Service-Signature",valid?com.sporthub.common.security.ServiceCalls.sign("synthetic-wallet-test-key-over-thirty-two-characters",r.getMethod(),r.getRequestURI(),time,body):"forged");return r;

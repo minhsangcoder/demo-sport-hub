@@ -15,6 +15,11 @@ public class InternalTransferController {
     public InternalTransferController(TransferLeaseService service,ObjectMapper json,@Value("${SERVICE_CALL_SECRET}") String secret){this.service=service;this.json=json;this.secret=secret;}
     @GetMapping("/{id}") public ApiResponse<com.fasterxml.jackson.databind.JsonNode> inspect(@PathVariable UUID id,HttpServletRequest request){verify(request,"");return ApiResponse.success(service.inspect(id));}
     @GetMapping("/transfer-leases/{listingId}") public ApiResponse<java.util.Map<String,Object>> receipt(@PathVariable UUID listingId,HttpServletRequest request){verify(request,"");return ApiResponse.success(service.receipt(listingId));}
+    @GetMapping("/transfer-acquisitions/{id}/decision") public ApiResponse<java.util.Map<String,Object>> decision(@PathVariable UUID id,HttpServletRequest r){verify(r,"");return ApiResponse.success(service.decision(id));}
+    @PostMapping("/transfer-acquisitions/{id}/abort") public ApiResponse<java.util.Map<String,Object>> abort(@PathVariable UUID id,@RequestBody String body,HttpServletRequest r)throws Exception {
+        verify(r,body);var value=json.readTree(body);var command=json.treeToValue(value.path("command"),TransferLeaseService.Command.class);
+        if(command==null||!id.equals(command.acquisitionId()))throw new IllegalArgumentException("Abort path and acquisition differ");return ApiResponse.success(service.abort(command,value.path("reason").asText()));
+    }
     @PostMapping("/transfer/{action}") public ApiResponse<BookingDtos.Booking> command(@PathVariable String action,@RequestBody String body,HttpServletRequest request)throws Exception {
         verify(request,body);return ApiResponse.success(service.command(action,json.readValue(body,TransferLeaseService.Command.class)));
     }

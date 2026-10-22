@@ -585,7 +585,18 @@
               "pattern": "^[A-Za-z0-9_.:-]+$"
             }
           }
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcquireListing"
+              }
+            }
+          }
+        },
+        "description": "Buyer accepts current terms. Missing x or changed Owner fee prevents a new acquisition until seller requotes. Canonical DEMO SUCCESS automatically transfers booking rights and rotates check-in credentials; no Owner approval and no wait for A payout. A cannot buy own listing."
       }
     },
     "/transfers/acquisitions": {
@@ -867,6 +878,150 @@
           }
         ]
       }
+    },
+    "/transfers/quote": {
+      "post": {
+        "operationId": "quoteTransferListing",
+        "description": "Seller quote with live booking/facility/Owner/x and accepted r from the server; no bank setup.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateListing"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Server-recorded application result. DEMO never requires a bank account or real funds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DemoTransferTerms"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Wrong actor, facility or current grant"
+          },
+          "409": {
+            "description": "Stale terms, state or conflicting idempotency payload"
+          }
+        }
+      }
+    },
+    "/transfers/{id}/quote": {
+      "post": {
+        "operationId": "quoteTransferEdit",
+        "description": "Current seller edit quote; server resolves booking from listing. No client-provided recipient or booking rebinding.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditListing"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Server-recorded application result. DEMO never requires a bank account or real funds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DemoTransferTerms"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Wrong actor, facility or current grant"
+          },
+          "409": {
+            "description": "Stale terms, state or conflicting idempotency payload"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1003,6 +1158,10 @@
           "version": {
             "type": "integer",
             "format": "int64"
+          },
+          "financeTerms": {
+            "$ref": "#/components/schemas/DemoTransferTerms",
+            "description": "Optional retained legacy listing may have a historical non-DEMO shape. Such records cannot be silently converted into DEMO."
           }
         },
         "required": [
@@ -1069,6 +1228,10 @@
             "type": "string",
             "format": "uuid",
             "nullable": true
+          },
+          "financeTerms": {
+            "$ref": "#/components/schemas/DemoTransferTerms",
+            "description": "Optional retained legacy listing may have a historical non-DEMO shape. Such records cannot be silently converted into DEMO."
           }
         },
         "required": [
@@ -1098,6 +1261,17 @@
           "deadline": {
             "type": "string",
             "format": "date-time"
+          },
+          "acceptedTermsHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "Required by DEMO create/edit execution after server quote and explicit consent."
+          },
+          "beneficiaryRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "deprecated": true,
+            "description": "Retained legacy field. Ignored for DEMO; no beneficiary account is required."
           }
         },
         "required": [
@@ -1117,6 +1291,17 @@
           "deadline": {
             "type": "string",
             "format": "date-time"
+          },
+          "acceptedTermsHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "Required by DEMO create/edit execution after server quote and explicit consent."
+          },
+          "beneficiaryRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "deprecated": true,
+            "description": "Retained legacy field. Ignored for DEMO; no beneficiary account is required."
           }
         },
         "required": [
@@ -1160,6 +1345,9 @@
             "enum": [
               "TRANSFER"
             ]
+          },
+          "transferTerms": {
+            "$ref": "#/components/schemas/DemoTransferTerms"
           }
         },
         "required": [
@@ -1171,6 +1359,127 @@
           "currency",
           "expiresAt",
           "purpose"
+        ]
+      },
+      "DemoTransferTerms": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "DEMO"
+            ]
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "DEMO"
+            ]
+          },
+          "moneyClass": {
+            "type": "string",
+            "enum": [
+              "DEMO"
+            ]
+          },
+          "receiverFacilityId": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true
+          },
+          "receiverOwnerId": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true
+          },
+          "receiverName": {
+            "type": "string",
+            "readOnly": true
+          },
+          "policyVersion": {
+            "type": "integer",
+            "format": "int64",
+            "readOnly": true
+          },
+          "feeBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "readOnly": true
+          },
+          "feePolicyHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "quotedFeeAmount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "quotedSellerNetAmount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "VND"
+            ]
+          },
+          "rounding": {
+            "type": "string",
+            "enum": [
+              "HALF_UP"
+            ]
+          },
+          "termsHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "sellerTermsHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "refundPolicy": {
+            "type": "object",
+            "description": "Immutable booking-accepted independent cancellation r policy; configured, id, version, rateBps, currency, rounding, termsHash.",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "mode",
+          "receiverFacilityId",
+          "receiverName",
+          "policyVersion",
+          "feeBps",
+          "amount",
+          "quotedFeeAmount",
+          "quotedSellerNetAmount",
+          "termsHash",
+          "refundPolicy"
+        ],
+        "description": "Server snapshot; public listing excludes booking/seller/buyer/Owner identity and credentials. Quote/acquisition participant data contains the necessary private bindings. Facility owns F=HALF_UP(P*x/10000); N=P-F owed to A. SportHub earns none. No bank setup; x is not fixed. Current policy change requires seller requote before acquisition; locked acquisitions never reprice."
+      },
+      "AcquireListing": {
+        "type": "object",
+        "properties": {
+          "acceptedTermsHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "Explicit buyer consent to the current server listing terms; required for DEMO."
+          }
+        },
+        "required": [
+          "acceptedTermsHash"
         ]
       }
     }

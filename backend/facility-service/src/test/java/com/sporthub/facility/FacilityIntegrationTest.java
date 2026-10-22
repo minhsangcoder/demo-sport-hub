@@ -42,6 +42,8 @@ class FacilityIntegrationTest {
  UUID fixtureCategory;
  @BeforeEach void emptyBookingImpact(){fixtureCategory=service.createCategory(new CategoryInput("Fixture sport "+UUID.randomUUID(),true),new Caller(UUID.randomUUID(),"Test admin",Set.of("ADMIN"),Map.of())).id();org.mockito.Mockito.doAnswer(a->new com.sporthub.common.schedule.ConfigurationGuardProtocol.Prepared(a.<com.sporthub.common.schedule.ConfigurationGuardProtocol.Command>getArgument(0).operationId(),List.of())).when(guard).prepare(org.mockito.ArgumentMatchers.any());}
  @Autowired com.sporthub.facility.web.TransferPolicyController policies;
+ @Autowired com.sporthub.facility.service.FacilityRefundPolicyService refundPolicies;
+ @Autowired com.sporthub.facility.service.FacilityTransferFeePolicyService transferFees;
  private Caller owner(){return new Caller(UUID.randomUUID(),"Owner",Set.of("OWNER","CUSTOMER"),Map.of());}
  @Autowired OwnerSignupFacilityService signupFacilities;
  @Test void ownerSignupFirstCourtIsIdempotentPrivateAndCannotChangeBinding(){
@@ -155,6 +157,78 @@ class FacilityIntegrationTest {
   var owner=owner();var facility=service.create(input("Policy "+UUID.randomUUID()),owner);var request=new org.springframework.mock.web.MockHttpServletRequest();org.mockito.Mockito.when(identity.current(request)).thenReturn(owner);
   assertThat(policies.ownPolicy(facility.id(),request).getData().configured()).isFalse();var result=policies.update(facility.id(),new com.sporthub.facility.web.TransferPolicyController.PolicyInput(true,3600),request).getData();assertThat(result.configured()).isTrue();assertThat(result.minLeadSeconds()).isEqualTo(3600);
   org.mockito.Mockito.when(identity.current(request)).thenReturn(owner());assertThatThrownBy(()->policies.update(facility.id(),new com.sporthub.facility.web.TransferPolicyController.PolicyInput(false,0),request)).isInstanceOf(ForbiddenException.class);
+ }
+ @Test void refundPolicyIsVersionedHasNoDefaultAndRejectsNonOwners(){
+  var actor=owner();var f=service.create(input("Refund policy "+UUID.randomUUID()),actor);
+  assertThat(refundPolicies.own(f.id(),actor).configured()).isFalse();
+  assertThat(refundPolicies.own(f.id(),actor).rateBps()).isNull();
+  long version=0;
+  for(int rate:new int[]{0,5000,8000,10000}){
+   var next=refundPolicies.update(f.id(),new com.sporthub.facility.service.FacilityRefundPolicyService.Input(java.math.BigDecimal.valueOf(rate),version),actor);
+   assertThat(next.version()).isEqualTo(++version);assertThat(next.rateBps()).isEqualTo(rate);assertThat(next.termsHash()).hasSize(64);
+  }
+  assertThat(refundPolicies.version(f.id(),1).rateBps()).isZero();
+  assertThat(jdbc.queryForObject("SELECT count(*) FROM facility_audit WHERE facility_id=? AND action='REFUND_POLICY_UPDATED'",Integer.class,f.id())).isEqualTo(4);
+  assertThatThrownBy(()->refundPolicies.update(f.id(),new com.sporthub.facility.service.FacilityRefundPolicyService.Input(java.math.BigDecimal.ZERO,0L),actor)).isInstanceOf(ConflictException.class);
+  assertThatThrownBy(()->refundPolicies.update(f.id(),new com.sporthub.facility.service.FacilityRefundPolicyService.Input(java.math.BigDecimal.ZERO,4L),owner())).isInstanceOf(ForbiddenException.class);
+  var staff=new Caller(UUID.randomUUID(),"Staff",Set.of("STAFF"),Map.of(f.id(),Set.of("BOOKING_REFUND")));
+  assertThatThrownBy(()->refundPolicies.own(f.id(),staff)).isInstanceOf(ForbiddenException.class);
+  assertThatThrownBy(()->refundPolicies.update(f.id(),new com.sporthub.facility.service.FacilityRefundPolicyService.Input(java.math.BigDecimal.ZERO,4L),staff)).isInstanceOf(ForbiddenException.class);
+  assertThatThrownBy(()->jdbc.update("UPDATE facility_refund_policy_versions SET refund_rate_bps=5000 WHERE facility_id=? AND version=1",f.id())).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+  assertThatThrownBy(()->jdbc.update("DELETE FROM facility_refund_policy_heads WHERE facility_id=?",f.id())).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+ }
+ @Test void refundPolicyApiRejectsFractionalBasisPointsAndOutOfRangeInputs()throws Exception{
+  var actor=owner();var f=service.create(input("Refund validation "+UUID.randomUUID()),actor);
+  org.mockito.Mockito.when(identity.current(org.mockito.ArgumentMatchers.any())).thenReturn(actor);
+  for(String rate:List.of("-1","10001","8000.5","null")){
+   http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/v1/owner/facilities/"+f.id()+"/refund-policy").contentType("application/json").content("{\"rateBps\":"+rate+",\"version\":0}"))
+    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
+  }
+  assertThat(refundPolicies.own(f.id(),actor).configured()).isFalse();
+  http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/v1/owner/facilities/"+f.id()+"/refund-policy").contentType("application/json").content("{\"rateBps\":8000,\"version\":0}"))
+   .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+   .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.rateBps").value(8000));
+ }
+ @Test void transferFeePolicyIsVersionedHasNoDefaultAndRejectsNonOwners(){
+  var actor=owner();var f=service.create(input("Refund policy "+UUID.randomUUID()),actor);
+  assertThat(transferFees.own(f.id(),actor).configured()).isFalse();
+  assertThat(transferFees.own(f.id(),actor).feeBps()).isNull();
+  long version=0;
+  for(int rate:new int[]{0,5000,8000,10000}){
+   var next=transferFees.update(f.id(),new com.sporthub.facility.service.FacilityTransferFeePolicyService.Input(java.math.BigDecimal.valueOf(rate),version),actor);
+   assertThat(next.version()).isEqualTo(++version);assertThat(next.feeBps()).isEqualTo(rate);assertThat(next.termsHash()).hasSize(64);
+  }
+  assertThat(transferFees.version(f.id(),1).feeBps()).isZero();
+  assertThat(jdbc.queryForObject("SELECT count(*) FROM facility_audit WHERE facility_id=? AND action='TRANSFER_FEE_POLICY_UPDATED'",Integer.class,f.id())).isEqualTo(4);
+  assertThatThrownBy(()->transferFees.update(f.id(),new com.sporthub.facility.service.FacilityTransferFeePolicyService.Input(java.math.BigDecimal.ZERO,0L),actor)).isInstanceOf(ConflictException.class);
+  assertThatThrownBy(()->transferFees.update(f.id(),new com.sporthub.facility.service.FacilityTransferFeePolicyService.Input(java.math.BigDecimal.ZERO,4L),owner())).isInstanceOf(ForbiddenException.class);
+  var staff=new Caller(UUID.randomUUID(),"Staff",Set.of("STAFF"),Map.of(f.id(),Set.of("BOOKING_REFUND")));
+  assertThatThrownBy(()->transferFees.own(f.id(),staff)).isInstanceOf(ForbiddenException.class);
+  assertThatThrownBy(()->transferFees.update(f.id(),new com.sporthub.facility.service.FacilityTransferFeePolicyService.Input(java.math.BigDecimal.ZERO,4L),staff)).isInstanceOf(ForbiddenException.class);
+  assertThatThrownBy(()->jdbc.update("UPDATE facility_transfer_fee_policy_versions SET transfer_fee_bps=5000 WHERE facility_id=? AND version=1",f.id())).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+  assertThatThrownBy(()->jdbc.update("DELETE FROM facility_transfer_fee_policy_heads WHERE facility_id=?",f.id())).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+ }
+ @Test void transferFeePolicyApiRejectsFractionalBasisPointsAndOutOfRangeInputs()throws Exception{
+  var actor=owner();var f=service.create(input("Refund validation "+UUID.randomUUID()),actor);
+  org.mockito.Mockito.when(identity.current(org.mockito.ArgumentMatchers.any())).thenReturn(actor);
+  for(String rate:List.of("-1","10001","8000.5","null")){
+   http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/v1/owner/facilities/"+f.id()+"/transfer-fee-policy").contentType("application/json").content("{\"feeBps\":"+rate+",\"version\":0}"))
+    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
+  }
+  assertThat(transferFees.own(f.id(),actor).configured()).isFalse();
+  http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/v1/owner/facilities/"+f.id()+"/transfer-fee-policy").contentType("application/json").content("{\"feeBps\":8000,\"version\":0}"))
+   .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+   .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.feeBps").value(8000));
+ }
+ @Test void transferFeePolicyIsIndependentPerFacilityAndSeparateFromRefundPolicy(){
+  var actor=owner();var first=service.create(input("Fee facility A "+UUID.randomUUID()),actor);var second=service.create(input("Fee facility B "+UUID.randomUUID()),actor);
+  var a=transferFees.update(first.id(),new com.sporthub.facility.service.FacilityTransferFeePolicyService.Input(java.math.BigDecimal.valueOf(500),0L),actor);
+  var b=transferFees.update(second.id(),new com.sporthub.facility.service.FacilityTransferFeePolicyService.Input(java.math.BigDecimal.valueOf(1000),0L),actor);
+  refundPolicies.update(first.id(),new com.sporthub.facility.service.FacilityRefundPolicyService.Input(java.math.BigDecimal.valueOf(8000),0L),actor);
+  assertThat(a.feeBps()).isEqualTo(500);assertThat(b.feeBps()).isEqualTo(1000);assertThat(refundPolicies.own(first.id(),actor).rateBps()).isEqualTo(8000);
+  transferFees.update(first.id(),new com.sporthub.facility.service.FacilityTransferFeePolicyService.Input(java.math.BigDecimal.ZERO,1L),actor);
+  assertThat(transferFees.own(second.id(),actor).feeBps()).isEqualTo(1000);assertThat(transferFees.version(first.id(),1).feeBps()).isEqualTo(500);
+  assertThat(a.termsHash()).isNotEqualTo(b.termsHash());
  }
  @Test void facilityCrudRemainsDraftAndOwnerScoped(){
   var owner=owner();var facility=service.create(input("Facility "+UUID.randomUUID()),owner);

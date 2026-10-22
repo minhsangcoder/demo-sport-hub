@@ -3188,6 +3188,9 @@
           }
         ],
         "responses": {
+          "204": {
+            "description": "Metadata removed, durable object cleanup queued"
+          },
           "400": {
             "description": "Invalid input"
           },
@@ -3202,9 +3205,6 @@
           },
           "409": {
             "description": "Review state conflict"
-          },
-          "204": {
-            "description": "Metadata removed, durable object cleanup queued"
           }
         },
         "parameters": [
@@ -3300,6 +3300,416 @@
             }
           }
         ]
+      }
+    },
+    "/owner/facilities/{id}/refund-policy": {
+      "get": {
+        "operationId": "getOwnedFacilityRefundPolicy",
+        "description": "Only the actual facility Owner. Staff refund permission does not grant policy editing or reading this Owner workspace.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/FacilityRefundPolicy"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Outside facility ownership"
+          },
+          "409": {
+            "description": "Version conflict"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateOwnedFacilityRefundPolicy",
+        "description": "Creates an immutable version using expected-version CAS. Existing booking snapshots are unchanged. No default policy or automatic Staff grants.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FacilityRefundPolicyInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/FacilityRefundPolicy"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Outside facility ownership"
+          },
+          "409": {
+            "description": "Version conflict"
+          }
+        }
+      }
+    },
+    "/facilities/{id}/refund-policy": {
+      "get": {
+        "operationId": "getPublicFacilityRefundPolicy",
+        "description": "Policy published for an available facility before booking purchase. Unconfigured rate is null.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/FacilityRefundPolicy"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Outside facility ownership"
+          },
+          "409": {
+            "description": "Version conflict"
+          }
+        }
+      }
+    },
+    "/owner/facilities/{id}/transfer-fee-policy": {
+      "get": {
+        "operationId": "getOwnedFacilityTransferFeePolicy",
+        "description": "Facility-scoped transfer fee policy. Only the actual facility Owner can configure it with CAS and audit. No rate is seeded; fees belong entirely to this facility and acquired terms remain immutable.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/FacilityTransferFeePolicy"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Outside facility ownership"
+          },
+          "409": {
+            "description": "Version conflict"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateOwnedFacilityTransferFeePolicy",
+        "description": "Facility-scoped transfer fee policy. Only the actual facility Owner can configure it with CAS and audit. No rate is seeded; fees belong entirely to this facility and acquired terms remain immutable.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FacilityTransferFeePolicyInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/FacilityTransferFeePolicy"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Outside facility ownership"
+          },
+          "409": {
+            "description": "Version conflict"
+          }
+        }
+      }
+    },
+    "/facilities/{id}/transfer-fee-policy": {
+      "get": {
+        "operationId": "getPublicFacilityTransferFeePolicy",
+        "description": "Facility-scoped transfer fee policy. Only the actual facility Owner can configure it with CAS and audit. No rate is seeded; fees belong entirely to this facility and acquired terms remain immutable.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/FacilityTransferFeePolicy"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Outside facility ownership"
+          },
+          "409": {
+            "description": "Version conflict"
+          }
+        }
       }
     }
   },
@@ -4112,6 +4522,164 @@
           "amenities",
           "version"
         ]
+      },
+      "FacilityRefundPolicy": {
+        "type": "object",
+        "required": [
+          "configured",
+          "id",
+          "version",
+          "rateBps",
+          "currency",
+          "rounding",
+          "termsHash",
+          "createdAt"
+        ],
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rateBps": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 0,
+            "maximum": 10000,
+            "description": "Cancellation refund rate in whole basis points, independently configured from this facility transfer fee."
+          },
+          "currency": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "VND"
+            ]
+          },
+          "rounding": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "HALF_UP"
+            ]
+          },
+          "termsHash": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "FacilityRefundPolicyInput": {
+        "type": "object",
+        "required": [
+          "rateBps",
+          "version"
+        ],
+        "properties": {
+          "rateBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "description": "Cancellation refund rate in whole basis points, independently configured from this facility transfer fee."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Expected current version; zero only for first explicit configuration."
+          }
+        }
+      },
+      "FacilityTransferFeePolicy": {
+        "type": "object",
+        "required": [
+          "configured",
+          "id",
+          "version",
+          "feeBps",
+          "currency",
+          "rounding",
+          "termsHash",
+          "createdAt"
+        ],
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "feeBps": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 0,
+            "maximum": 10000,
+            "description": "Fee set by this facility Owner in whole basis points (500 = 5%). The fee belongs to the facility, with no platform income. Independent of the cancellation refund rate."
+          },
+          "currency": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "VND"
+            ]
+          },
+          "rounding": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "HALF_UP"
+            ]
+          },
+          "termsHash": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "FacilityTransferFeePolicyInput": {
+        "type": "object",
+        "required": [
+          "feeBps",
+          "version"
+        ],
+        "properties": {
+          "feeBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "description": "Fee set by this facility Owner in whole basis points (500 = 5%). The fee belongs to the facility, with no platform income. Independent of the cancellation refund rate."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Expected current version; zero only for first explicit configuration."
+          }
+        }
       }
     }
   }

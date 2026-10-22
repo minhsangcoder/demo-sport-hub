@@ -17,8 +17,8 @@ import java.util.*;
 @Service @Transactional(readOnly=true)
 public class PaymentService {
  private final PaymentRepository repo;private final PayableClient payable;private final PaymentProvider provider;
- private final ReliableOutbox outbox;private final ObjectMapper json;private final java.time.Clock clock;private final PaymentObligations obligations;private final PaymentCallbacks callbacks;
- public PaymentService(PaymentRepository repo,PayableClient payable,PaymentProvider provider,ReliableOutbox outbox,ObjectMapper json,java.time.Clock clock,PaymentObligations obligations,PaymentCallbacks callbacks){this.repo=repo;this.payable=payable;this.provider=provider;this.outbox=outbox;this.json=json;this.clock=clock;this.obligations=obligations;this.callbacks=callbacks;}
+ private final ReliableOutbox outbox;private final ObjectMapper json;private final java.time.Clock clock;private final PaymentObligations obligations;private final PaymentCallbacks callbacks;private final PaymentTransferTerms transferTerms;
+ public PaymentService(PaymentRepository repo,PayableClient payable,PaymentProvider provider,ReliableOutbox outbox,ObjectMapper json,java.time.Clock clock,PaymentObligations obligations,PaymentCallbacks callbacks,PaymentTransferTerms transferTerms){this.repo=repo;this.payable=payable;this.provider=provider;this.outbox=outbox;this.json=json;this.clock=clock;this.obligations=obligations;this.callbacks=callbacks;this.transferTerms=transferTerms;}
  @Transactional public Payment create(CreatePayment input,String key,Caller caller,String token){
   checkKey(key);if(input.memberId()!=null&&input.acquisitionId()!=null)throw new IllegalArgumentException("Payment cannot be both a group contribution and a transfer");repo.lock(caller.id());
   var existing=repo.list("SELECT p.* FROM payment_orders p JOIN payment_requests r ON r.payment_id=p.id WHERE r.payer_id=? AND r.idempotency_key=?",caller.id(),key);
@@ -48,7 +48,7 @@ public class PaymentService {
   if(reference==null||reference.isBlank()||reference.length()>120)throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_GATEWAY,"Provider did not return a valid payment reference");
   if(!clock.instant().isBefore(expires))throw new ConflictException("Payment deadline expired during provider initialization");
   repo.jdbc().update("INSERT INTO payment_orders(id,booking_id,payer_id,member_id,acquisition_id,seller_id,purpose,amount,currency,provider,provider_reference,status,idempotency_key,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,'PENDING',?,?)",id,input.bookingId(),caller.id(),input.memberId(),input.acquisitionId(),seller,purpose,amount,currency,provider.name(),reference,key,Timestamp.from(expires));
-  var result=repo.find(id);obligations.current(result);remember(input,key,caller,id);audit(id,caller.id(),"PAYMENT_CREATED",Map.of("provider",provider.name()));return result;
+  var result=repo.find(id);transferTerms.capture(result,bill.get("transferTerms"));obligations.current(result);remember(input,key,caller,id);audit(id,caller.id(),"PAYMENT_CREATED",Map.of("provider",provider.name()));return result;
  }
  @Transactional public Payment expire(UUID id){
   var old=repo.find(id);repo.lock(old.bookingId());repo.lock(id);var current=repo.find(id);

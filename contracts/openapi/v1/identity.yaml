@@ -1798,6 +1798,236 @@
           }
         ]
       }
+    },
+    "/staff-bindings/facilities/{facilityId}/permission-catalog": {
+      "get": {
+        "operationId": "getFacilityStaffPermissionCatalog",
+        "description": "Actual facility Owner only. The catalog is not a grant; BOOKING_REFUND is never selected or assigned automatically.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "facilityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "array",
+                      "uniqueItems": true,
+                      "items": {
+                        "$ref": "#/components/schemas/AssignedPermission"
+                      }
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Outside facility ownership"
+          },
+          "409": {
+            "description": "Version conflict"
+          }
+        }
+      }
+    },
+    "/staff-bindings/facilities/{facilityId}/{bindingId}/permissions": {
+      "get": {
+        "operationId": "getFacilityStaffPermissions",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "facilityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "bindingId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/StaffPermissionsView"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Outside facility ownership"
+          },
+          "409": {
+            "description": "Version conflict"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateFacilityStaffPermissions",
+        "description": "Owner-controlled grants/revocations for an active binding with expected-version CAS and audit. No self-grant by Staff. BOOKING_REFUND is scoped to this facility.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "facilityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "bindingId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaffPermissionsInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/StaffPermissionsView"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Outside facility ownership"
+          },
+          "409": {
+            "description": "Version conflict"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2255,10 +2485,9 @@
         "maxItems": 50,
         "uniqueItems": true,
         "items": {
-          "type": "string",
-          "pattern": "^[A-Z][A-Z0-9_]{2,63}$"
+          "$ref": "#/components/schemas/AssignedPermission"
         },
-        "description": "Permission names from the platform permission catalog; the exact catalog remains an open authorization decision."
+        "description": "Explicit facility Staff grants. BOOKING_REFUND and TRANSFER_PAYOUT require separate Owner opt-ins; neither grants policy changes, self-grant, or Owner/Admin revenue access."
       },
       "RegisterResult": {
         "type": "object",
@@ -2683,7 +2912,12 @@
           "BOOKING_CREATE_COUNTER",
           "BOOKING_PAYMENT_COUNTER",
           "BOOKING_CHECK_IN",
-          "SCHEDULE_READ"
+          "BOOKING_REFUND",
+          "SCHEDULE_READ",
+          "SCHEDULE_MANAGE",
+          "COURT_STATUS_MANAGE",
+          "COURT_MAINTENANCE_MANAGE",
+          "TRANSFER_PAYOUT"
         ]
       },
       "FacilityBinding": {
@@ -2696,7 +2930,7 @@
           "permissions": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/AssignedPermission"
+              "type": "string"
             }
           }
         },
@@ -3569,6 +3803,52 @@
           }
         },
         "description": "Max total 31 MB. Owner option requires all three files."
+      },
+      "StaffPermissionsInput": {
+        "type": "object",
+        "required": [
+          "permissions",
+          "expectedVersion"
+        ],
+        "properties": {
+          "permissions": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/AssignedPermission"
+            }
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "StaffPermissionsView": {
+        "type": "object",
+        "required": [
+          "bindingId",
+          "permissions",
+          "version"
+        ],
+        "properties": {
+          "bindingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AssignedPermission"
+            }
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
       }
     }
   }

@@ -107,7 +107,7 @@ public class GlobalExceptionHandler {
             MethodArgumentTypeMismatchException ex, HttpServletRequest request) {
         String message = String.format("Parameter '%s' must be of type %s",
                 ex.getName(), ex.getRequiredType() != null ? ex.getRequiredType().getSimpleName() : "unknown");
-        log.warn("[{}] {}", ErrorCode.VALIDATION_ERROR.getCode(), message);
+        log.warn("[{}] {} | Root: {}", ErrorCode.VALIDATION_ERROR.getCode(), message, ex.getMessage());
         return response(HttpStatus.BAD_REQUEST, ErrorCode.VALIDATION_ERROR, message, request, null, null);
     }
 
@@ -129,9 +129,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneric(Exception ex, HttpServletRequest request) {
         // Upstream exceptions can embed response bodies, credentials or SQL parameters.
-        log.error("[{}] Unexpected error at URI: {} | Type: {} | Stack: {}",
+        log.error("[{}] Unexpected error at URI: {} | Type: {}",
                 ErrorCode.INTERNAL_ERROR.getCode(), request.getRequestURI(),
-                ex.getClass().getSimpleName(), java.util.Arrays.toString(ex.getStackTrace()));
+                ex.getClass().getSimpleName());
         return response(HttpStatus.INTERNAL_SERVER_ERROR, ErrorCode.INTERNAL_ERROR,
                 "An unexpected error occurred. Please try again later.", request, null, null);
     }

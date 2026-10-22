@@ -10,7 +10,7 @@ import java.util.UUID;
 class GroupReminderMigrationTest {
     @Test void freshAndV3UpgradePreserveLegacyMembersAndValidateHistory()throws Exception{
         PostgreSQLContainer<?> temporary=null;String url=System.getenv("SPORTHUB_BOOKING_TEST_DB_URL"),user=System.getenv("SPORTHUB_TEST_DB_USER"),password=System.getenv("SPORTHUB_TEST_DB_PASSWORD");
-        if(url==null){temporary=new PostgreSQLContainer<>("postgres:16-alpine");temporary.start();url=temporary.getJdbcUrl();user=temporary.getUsername();password=temporary.getPassword();}
+        if(url==null){temporary=new PostgreSQLContainer<>("postgres:16-alpine").withInitScript("booking-test-prerequisites.sql");temporary.start();url=temporary.getJdbcUrl();user=temporary.getUsername();password=temporary.getPassword();}
         try{for(boolean upgrade:new boolean[]{false,true}){
             String schema="reminder_migration_"+UUID.randomUUID().toString().replace("-","");
             if(upgrade){
@@ -23,7 +23,7 @@ class GroupReminderMigrationTest {
                     s.execute("INSERT INTO group_members(id,group_id,user_id,display_name,amount_due,amount_paid,payment_state) SELECT gen_random_uuid(),id,customer_id,'Legacy',100,0,'WAITING_FOR_PAYMENT' FROM bookings");
                 }
             }
-            var latest=Flyway.configure().dataSource(url,user,password).schemas(schema).defaultSchema(schema).load();latest.migrate();latest.validate();assertThat(latest.info().current().getVersion().toString()).isEqualTo("10");
+            var latest=Flyway.configure().dataSource(url,user,password).schemas(schema).defaultSchema(schema).load();latest.migrate();latest.validate();assertThat(latest.info().current().getVersion().toString()).isEqualTo("16");
             try(var c=DriverManager.getConnection(url,user,password);var s=c.createStatement()){
                 try(var r=s.executeQuery("SELECT count(*) FROM "+schema+".flyway_schema_history WHERE NOT success")){r.next();assertThat(r.getInt(1)).isZero();}
                 if(upgrade)try(var r=s.executeQuery("SELECT amount_due,amount_paid,payment_state,last_reminder_at FROM "+schema+".group_members")){assertThat(r.next()).isTrue();assertThat(r.getBigDecimal(1)).isEqualByComparingTo("100");assertThat(r.getBigDecimal(2)).isZero();assertThat(r.getString(3)).isEqualTo("WAITING_FOR_PAYMENT");assertThat(r.getTimestamp(4)).isNull();}

@@ -54,7 +54,7 @@ public class GroupService {
             if(!prior.get(0).get("fingerprint").equals(fingerprint))throw new ConflictException("Group key was used with different input");
             return load((UUID)prior.get(0).get("resource_id"));
         }
-        var hold=bookings.ownHold(input.holdId(),caller);
+        var hold=bookings.ownHold(input.holdId(),caller,token);
         if(hold.startsAt().isBefore(clock.instant().plusSeconds(minLeadSeconds)))
             throw new ConflictException("Group booking requires at least "+minLeadSeconds/3600+" hours before play");
         var booking=bookings.create(new CreateInput(hold.id(),null,null),Signatures.sha256(root==null?"GROUP|"+key:"GROUP_REUSE|"+root+"|"+key),caller,token,false);

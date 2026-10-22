@@ -11,5 +11,5 @@ import java.util.Map;
 public class PaymentReportingController {
  private final PaymentReportingService service;private final RemoteIdentity identity;
  public PaymentReportingController(PaymentReportingService service,RemoteIdentity identity){this.service=service;this.identity=identity;}
- @GetMapping("/collections") public ApiResponse<Map<String,Object>> collections(@RequestParam(required=false) @DateTimeFormat(iso=DateTimeFormat.ISO.DATE_TIME) Instant from,@RequestParam(required=false) @DateTimeFormat(iso=DateTimeFormat.ISO.DATE_TIME) Instant to,@RequestParam(defaultValue="UTC") String timezone,HttpServletRequest r){return ApiResponse.success(service.collections(from,to,timezone,identity.current(r)));}
+ @GetMapping("/collections") public ApiResponse<Map<String,Object>> collections(@RequestParam(required=false) Instant from,@RequestParam(required=false) Instant to,@RequestParam(defaultValue="UTC") String timezone,HttpServletRequest r){return ApiResponse.success(service.collections(from,to,timezone,identity.current(r)));}
 }

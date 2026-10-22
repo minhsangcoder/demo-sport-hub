@@ -363,7 +363,9 @@ export function OperationsPage({
                                     <strong>#{shortId(b.id)}</strong>
                                     <small>
                                       {b.guestName ??
-                                        `Người dùng #${shortId(b.currentHolderId)}`}
+                                        (b.currentHolderId
+                                          ? `Người dùng #${shortId(b.currentHolderId)}`
+                                          : "Khách vãng lai")}
                                     </small>
                                   </td>
                                   <td>

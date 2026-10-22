@@ -20,14 +20,19 @@ public class BookingLifecycle {
         "CHECKED_IN",Set.of("COMPLETED"));
     private final BookingRepository repo;
     private final Clock clock;
-    public BookingLifecycle(BookingRepository repo,Clock clock){this.repo=repo;this.clock=clock;}
+    private final LocalAppliedCollections collections;
+    @org.springframework.beans.factory.annotation.Autowired
+    public BookingLifecycle(BookingRepository repo,Clock clock,LocalAppliedCollections collections){this.repo=repo;this.clock=clock;this.collections=Objects.requireNonNull(collections);}
+    public BookingLifecycle(BookingRepository repo,Clock clock){this(repo,clock,new LocalAppliedCollections(repo,clock));}
 
     public boolean hasLiveHold(Booking booking,Instant now){
         return repo.jdbc().queryForObject("""
             SELECT count(*) FROM slot_reservations r JOIN bookings b ON b.reservation_id=r.id
             WHERE b.id=? AND r.state='HOLD' AND r.expires_at>? AND r.expires_at=b.hold_expires_at
               AND r.court_id=b.court_id AND r.facility_id=b.facility_id
-              AND r.starts_at=b.starts_at AND r.ends_at=b.ends_at AND r.holder_id=b.current_holder_id
+              AND r.starts_at=b.starts_at AND r.ends_at=b.ends_at
+              AND r.holder_id IS NOT DISTINCT FROM b.current_holder_id
+              AND (b.current_holder_id IS NOT NULL OR (b.source='OFFLINE_COUNTER' AND EXISTS(SELECT 1 FROM counter_booking_guests g WHERE g.booking_id=b.id AND g.linked_customer_id IS NULL)))
             """,Integer.class,booking.id(),Timestamp.from(now))==1;
     }
 
@@ -35,6 +40,7 @@ public class BookingLifecycle {
     public Booking transition(Booking booking,String next,UUID actor,String action,Object details,Instant at,UUID payment){
         if(!NEXT.getOrDefault(booking.status(),Set.of()).contains(next))
             throw new ConflictException("Booking transition is not permitted");
+        if(next.equals("CHECKED_IN"))collections.requireFullyPaid(booking);
         Instant now=clock.instant();
         if(next.equals("CONFIRMED")){
             if(at==null||!at.isBefore(booking.holdExpiresAt())||!now.isBefore(booking.holdExpiresAt())||!hasLiveHold(booking,now))

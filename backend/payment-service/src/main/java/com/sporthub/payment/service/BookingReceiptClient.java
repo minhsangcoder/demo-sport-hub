@@ -22,4 +22,11 @@ public class BookingReceiptClient {
         }catch(org.springframework.web.client.HttpClientErrorException ex){if(ex.getStatusCode().value()==404)throw new Missing();throw new Unavailable();}
         catch(org.springframework.web.client.RestClientException ex){throw new Unavailable();}
     }
+    public JsonNode acquisitionDecision(UUID acquisition){
+        String path="/api/v1/internal/bookings/transfer-acquisitions/"+acquisition+"/decision";long time=Instant.now().getEpochSecond();
+        if(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())throw new IllegalStateException("Decision lookup must run outside a database transaction");
+        try{var body=client.get().uri(path).header("X-Service-Time",Long.toString(time)).header("X-Service-Signature",ServiceCalls.sign(secret,"GET",path,time,"" )).retrieve().body(JsonNode.class);
+            if(body==null||!body.path("data").isObject())throw new Unavailable();return body.path("data");
+        }catch(org.springframework.web.client.RestClientException ex){throw new Unavailable();}
+    }
 }

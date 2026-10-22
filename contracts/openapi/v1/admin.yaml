@@ -1093,6 +1093,80 @@
           }
         ]
       }
+    },
+    "/admin/bookings/demo-finance": {
+      "get": {
+        "operationId": "adminDemoFinanceMonitor",
+        "description": "ADMIN read-only application DEMO monitor, latest 200 items per kind. Facility revenue/obligations, not SportHub revenue. This role does not grant Owner money execution or Owner reports.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-recorded application result. DEMO never requires a bank account or real funds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DemoFinanceMonitor"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Wrong actor, facility or current grant"
+          },
+          "409": {
+            "description": "Stale terms, state or conflicting idempotency payload"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1755,6 +1829,59 @@
           }
         },
         "required": []
+      },
+      "DemoFinanceMonitor": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "DEMO"
+            ]
+          },
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "limit": {
+            "type": "integer",
+            "enum": [
+              200
+            ]
+          },
+          "dateBasis": {
+            "type": "string"
+          },
+          "settlements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "Read-only facility settlement amounts/state/time. No participant PII, tokens or money command.",
+              "additionalProperties": true
+            }
+          },
+          "refunds": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "Read-only facility refund amounts/state/time. No Guest phone, bank data or credentials.",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "mode",
+          "from",
+          "to",
+          "limit",
+          "dateBasis",
+          "settlements",
+          "refunds"
+        ]
       }
     }
   }

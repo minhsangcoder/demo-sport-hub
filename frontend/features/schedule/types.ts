@@ -3,6 +3,6 @@ export type ScheduleException = { id:string;courtId:string|null;date:string;type
 export type PriceRule = { id:string;courtId:string|null;sportCategoryId:string|null;courtTypeId?:string|null;dayOfWeek:number|null;specificDate:string|null;startsAt:string;endsAt:string;pricePerSlot:number;priority:number;label:string;effectiveFrom:string;effectiveTo:string|null;currency:string;active:boolean;version:number }
 export type Slot = { startsAt:string;endsAt:string;state:string;reason:string|null;amount:number|null;currency:string;ruleId:string|null;ruleVersion:number;ruleLabel:string|null }
 export type Preview = { facilityId:string;courtId:string;date:string;timezone:string;slots:Slot[] }
-export type Quote = { facilityId:string;courtId:string;startsAt:string;endsAt:string;amount:number;currency:string;timezone:string;segments:Slot[] }
+export type Quote = { facilityId:string;courtId:string;startsAt:string;endsAt:string;amount:number;currency:string;timezone:string;segments:Slot[];refundPolicy?:import('@/features/facility/refund-policy').RefundPolicy }
 export const weekdays = ['Thứ hai','Thứ ba','Thứ tư','Thứ năm','Thứ sáu','Thứ bảy','Chủ nhật']
 export function money(value:number,currency='VND'){return new Intl.NumberFormat('vi-VN',{style:'currency',currency,minimumFractionDigits:0,maximumFractionDigits:2}).format(value)}

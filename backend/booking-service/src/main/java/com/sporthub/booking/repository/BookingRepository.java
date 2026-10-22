@@ -17,13 +17,28 @@ public class BookingRepository {
     public void lock(UUID id){jdbc.queryForObject("SELECT pg_advisory_xact_lock(hashtextextended(?,0))",Object.class,id.toString());}
     public Hold hold(UUID id) {return jdbc.query("SELECT * FROM slot_reservations WHERE id=?",(r,n)->new Hold(id,uuid(r,"court_id"),uuid(r,"facility_id"),uuid(r,"holder_id"),instant(r,"starts_at"),instant(r,"ends_at"),instant(r,"expires_at"),r.getString("state"),read(r.getString("quote"))),id).stream().findFirst().orElseThrow(()->new ResourceNotFoundException("Hold not found"));}
     public Booking find(UUID id) {return list("SELECT * FROM bookings WHERE id=?",id).stream().findFirst().orElseThrow(()->new ResourceNotFoundException("Booking not found"));}
-    public List<Booking> mine(UUID id){return list("SELECT * FROM bookings WHERE current_holder_id=? OR customer_id=? OR created_by=? ORDER BY starts_at DESC LIMIT 200",id,id,id);}
+    public List<Booking> mine(UUID id){
+        return list("""
+            SELECT b.* FROM bookings b
+            WHERE (b.current_holder_id=? OR b.customer_id=? OR EXISTS(SELECT 1 FROM transfer_leases l WHERE l.booking_id=b.id AND l.seller_id=? AND l.state='COMPLETED'))
+              AND NOT (b.source='OFFLINE_COUNTER' AND b.created_by=?
+                       AND NOT EXISTS(SELECT 1 FROM counter_booking_guests g WHERE g.booking_id=b.id AND g.linked_customer_id=?)
+                       AND NOT EXISTS(SELECT 1 FROM transfer_leases l WHERE l.booking_id=b.id AND l.buyer_id=? AND l.state='COMPLETED'))
+            ORDER BY b.starts_at DESC LIMIT 200
+            """, id, id, id, id, id, id);
+    }
     public List<Booking> facility(UUID id){return list("SELECT * FROM bookings WHERE facility_id=? ORDER BY starts_at DESC LIMIT 500",id);}
     public List<Booking> list(String sql,Object... args) {return jdbc.query(sql,mapper(),args);}
     public List<History> history(UUID id) {return jdbc.query("SELECT * FROM booking_history WHERE booking_id=? ORDER BY created_at,id",(r,n)->new History(uuid(r,"id"),r.getString("action"),uuid(r,"actor_id"),read(r.getString("details")),instant(r,"created_at")),id);}
     public void history(UUID id,UUID actor,String action,Object details) {
         var value=json.valueToTree(details);var enriched=value.isObject()?((com.fasterxml.jackson.databind.node.ObjectNode)value).deepCopy():json.createObjectNode();
-        var booking=find(id);enriched.put("bookingSource",booking.source()).put("status",booking.status()).put("currentHolderId",booking.currentHolderId().toString()).put("customerId",booking.customerId().toString()).put("createdBy",booking.createdBy().toString());
+        var booking=find(id);
+        enriched.put("bookingSource",booking.source()).put("status",booking.status());
+        if(booking.currentHolderId()==null) enriched.putNull("currentHolderId");
+        else enriched.put("currentHolderId",booking.currentHolderId().toString());
+        if(booking.customerId()==null) enriched.putNull("customerId");
+        else enriched.put("customerId",booking.customerId().toString());
+        enriched.put("createdBy",booking.createdBy().toString());
         if(!enriched.has("changeSource"))enriched.put("changeSource",actor==null?"SYSTEM":action.startsWith("TRANSFER")?"TRANSFER_COMMAND":action.startsWith("PAYMENT")||action.equals("CONFIRMED")||action.equals("GROUP_CONFIRMED")?"PAYMENT_EVENT":action.startsWith("GROUP")?"GROUP_API":action.equals("BOOKING_CREATED")&&booking.source().equals("OFFLINE_COUNTER")?"COUNTER_API":"BOOKING_API");
         if(!enriched.has("paymentId")&&booking.paymentId()!=null)enriched.put("paymentId",booking.paymentId().toString());
         if(action.equals("BOOKING_CREATED")){enriched.putNull("previousStatus");enriched.put("newStatus",booking.status());}

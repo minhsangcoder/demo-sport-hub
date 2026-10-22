@@ -11,5 +11,5 @@ import java.util.*;
 public class BookingReportingController {
  private final BookingReportingService service;private final RemoteIdentity identity;
  public BookingReportingController(BookingReportingService service,RemoteIdentity identity){this.service=service;this.identity=identity;}
- @GetMapping("/{id}/activity") public ApiResponse<Map<String,Object>> activity(@PathVariable UUID id,@RequestParam(required=false) @DateTimeFormat(iso=DateTimeFormat.ISO.DATE_TIME) Instant from,@RequestParam(required=false) @DateTimeFormat(iso=DateTimeFormat.ISO.DATE_TIME) Instant to,@RequestParam(defaultValue="UTC") String timezone,HttpServletRequest r){return ApiResponse.success(service.activity(id,from,to,timezone,identity.current(r),r.getHeader("Authorization")));}
+ @GetMapping("/{id}/activity") public ApiResponse<Map<String,Object>> activity(@PathVariable UUID id,@RequestParam(required=false) Instant from,@RequestParam(required=false) Instant to,@RequestParam(defaultValue="UTC") String timezone,HttpServletRequest r){return ApiResponse.success(service.activity(id,from,to,timezone,identity.current(r),r.getHeader("Authorization")));}
 }

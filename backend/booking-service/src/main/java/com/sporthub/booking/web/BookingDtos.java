@@ -15,7 +15,13 @@ public final class BookingDtos {
     public record CounterInput(@NotNull UUID courtId,@NotNull Instant startsAt,@NotNull Instant endsAt,
         @NotNull @DecimalMin(value="0",inclusive=false) BigDecimal expectedAmount,
         @NotBlank @Size(max=180) String guestName,@NotBlank @Pattern(regexp="\\+?[0-9]{8,15}") String guestPhone,
-        @Size(max=30) String paymentMethod) {}
+        @Size(max=30) String paymentMethod,
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        @Pattern(regexp="[a-f0-9]{64}") String refundPolicyHash) {
+        public CounterInput(UUID courtId,Instant startsAt,Instant endsAt,BigDecimal expectedAmount,String guestName,String guestPhone,String paymentMethod){
+            this(courtId,startsAt,endsAt,expectedAmount,guestName,guestPhone,paymentMethod,null);
+        }
+    }
     public record CancelInput(@NotBlank @Size(max=500) String reason) {}
     public record CheckinInput(@NotBlank @Size(max=500) String token) {}
     public record Booking(UUID id,UUID facilityId,UUID courtId,UUID customerId,UUID currentHolderId,UUID createdBy,

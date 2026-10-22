@@ -27,6 +27,27 @@ public class BookingDependencies {
         catch(org.springframework.web.client.RestClientException|IllegalStateException|IllegalArgumentException ex){throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"Customer lookup could not be verified");}
     }
     public JsonNode quote(HoldInput input){try{return schedule.post().uri("/api/v1/schedules/public/quote").body(Map.of("courtId",input.courtId(),"startsAt",input.startsAt(),"endsAt",input.endsAt())).retrieve().body(JsonNode.class).path("data");}catch(org.springframework.web.client.HttpClientErrorException ex){throw new ConflictException("Schedule or pricing is no longer eligible");}}
+    public JsonNode refundPolicy(UUID facilityId){
+        try{var response=facility.get().uri("/api/v1/facilities/"+facilityId+"/refund-policy").retrieve().body(JsonNode.class);return response==null?null:response.get("data");}
+        catch(org.springframework.web.client.RestClientException ex){throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"Facility refund policy could not be verified");}
+    }
+    public JsonNode ownerFacility(UUID facilityId,Caller caller,String token){
+        caller.requireRole("OWNER");
+        try {
+            var response=facility.get().uri("/api/v1/owner/facilities/"+facilityId).header("Authorization",token).retrieve().body(JsonNode.class);
+            var data=response==null?null:response.get("data");
+            if(data==null||!facilityId.toString().equals(data.path("id").asText())||!caller.id().toString().equals(data.path("ownerId").asText()))throw new ForbiddenException("Facility is outside your ownership");
+            return data;
+        } catch(org.springframework.web.client.HttpClientErrorException ex){
+            if(ex.getStatusCode().value()==401)throw new UnauthorizedException("Session is invalid or expired");
+            throw new ForbiddenException("Facility is outside your ownership");
+        } catch(org.springframework.web.client.RestClientException ex){throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"Facility ownership could not be verified");}
+    }
+    public JsonNode ownerCourts(UUID facilityId,String token){
+        try{var body=facility.get().uri("/api/v1/owner/facilities/"+facilityId+"/courts").header("Authorization",token).retrieve().body(JsonNode.class);
+            if(body==null||!body.path("data").isArray())throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"Court names could not be loaded");return body.path("data");
+        }catch(org.springframework.web.client.RestClientException ex){throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"Court names could not be loaded");}
+    }
     public JsonNode preview(UUID court,String date){try{return schedule.get().uri("/api/v1/schedules/public/courts/"+court+"?date="+date).retrieve().body(JsonNode.class).path("data");}catch(org.springframework.web.client.HttpClientErrorException ex){throw new ResourceNotFoundException("Court is unavailable");}}
     public void facilityPermission(UUID facilityId,Caller caller,String token,String permission) {
         if(caller.hasRole("OWNER")) {

@@ -1186,6 +1186,44 @@ class IdentityServiceIntegrationTest {
         assertThatThrownBy(()->staff.assign(f,new StaffBindingService.Input(u.getEmail(),java.util.Set.of("BOOKING_READ")),owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ConflictException.class);
         var p=staff.profiles(f,owner,"Bearer fixture").getFirst();assertThat(staff.history(f,p.id(),owner,"Bearer fixture")).extracting(StaffBindingService.History::action).contains("STAFF_PERMISSIONS_CHANGED","STAFF_REVOKED");
     }
+    @Test void staffRefundPermissionIsExplicitOwnerScopedAndRevocable() throws Exception {
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);var u=activate(uniqueEmail("staff-refund"));
+        var binding=linkStaff(f,owner,u,java.util.Set.of("BOOKING_READ"));
+        var initial=staff.permissions(f,binding.id(),owner,"Bearer fixture");
+        assertThat(initial.permissions()).doesNotContain("BOOKING_REFUND");
+        var allowed=staff.updatePermissions(f,binding.id(),new StaffBindingService.PermissionsInput(java.util.Set.of("BOOKING_READ","BOOKING_REFUND"),initial.version()),owner,"Bearer fixture");
+        assertThat(allowed.permissions()).contains("BOOKING_REFUND");
+        String token=authService.login(new LoginRequest(u.getEmail(),"Password123!"),metadata).response().accessToken();
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/users/me/access").header("Authorization","Bearer "+token))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.facilityBindings[0].permissions").value(org.hamcrest.Matchers.hasItem("BOOKING_REFUND")));
+        var staffActor=applicant(userRepository.findById(u.getId()).orElseThrow());
+        assertThatThrownBy(()->staff.updatePermissions(f,binding.id(),new StaffBindingService.PermissionsInput(java.util.Set.of("BOOKING_REFUND"),allowed.version()),staffActor,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ForbiddenException.class);
+        assertThatThrownBy(()->staff.updatePermissions(UUID.randomUUID(),binding.id(),new StaffBindingService.PermissionsInput(java.util.Set.of("BOOKING_REFUND"),allowed.version()),owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ForbiddenException.class);
+        var revoked=staff.updatePermissions(f,binding.id(),new StaffBindingService.PermissionsInput(java.util.Set.of("BOOKING_READ"),allowed.version()),owner,"Bearer fixture");
+        assertThat(revoked.permissions()).doesNotContain("BOOKING_REFUND");
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/users/me/access").header("Authorization","Bearer "+token))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.facilityBindings[0].permissions").value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem("BOOKING_REFUND"))));
+        assertThatThrownBy(()->staff.updatePermissions(f,binding.id(),new StaffBindingService.PermissionsInput(java.util.Set.of("BOOKING_REFUND"),allowed.version()),owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ConflictException.class);
+    }
+    @Test void staffTransferPayoutPermissionIsExplicitOwnerScopedAndRevocable() throws Exception {
+        UUID f=UUID.randomUUID();var owner=staffOwner(f);var u=activate(uniqueEmail("staff-transfer-payout"));
+        var binding=linkStaff(f,owner,u,java.util.Set.of("BOOKING_READ"));
+        var initial=staff.permissions(f,binding.id(),owner,"Bearer fixture");
+        assertThat(initial.permissions()).doesNotContain("TRANSFER_PAYOUT");
+        var allowed=staff.updatePermissions(f,binding.id(),new StaffBindingService.PermissionsInput(java.util.Set.of("BOOKING_READ","TRANSFER_PAYOUT"),initial.version()),owner,"Bearer fixture");
+        assertThat(allowed.permissions()).contains("TRANSFER_PAYOUT");
+        String token=authService.login(new LoginRequest(u.getEmail(),"Password123!"),metadata).response().accessToken();
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/users/me/access").header("Authorization","Bearer "+token))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.facilityBindings[0].permissions").value(org.hamcrest.Matchers.hasItem("TRANSFER_PAYOUT")));
+        var staffActor=applicant(userRepository.findById(u.getId()).orElseThrow());
+        assertThatThrownBy(()->staff.updatePermissions(f,binding.id(),new StaffBindingService.PermissionsInput(java.util.Set.of("TRANSFER_PAYOUT"),allowed.version()),staffActor,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ForbiddenException.class);
+        assertThatThrownBy(()->staff.updatePermissions(UUID.randomUUID(),binding.id(),new StaffBindingService.PermissionsInput(java.util.Set.of("TRANSFER_PAYOUT"),allowed.version()),owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ForbiddenException.class);
+        var revoked=staff.updatePermissions(f,binding.id(),new StaffBindingService.PermissionsInput(java.util.Set.of("BOOKING_READ"),allowed.version()),owner,"Bearer fixture");
+        assertThat(revoked.permissions()).doesNotContain("TRANSFER_PAYOUT");
+        http.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/users/me/access").header("Authorization","Bearer "+token))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.facilityBindings[0].permissions").value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem("TRANSFER_PAYOUT"))));
+        assertThatThrownBy(()->staff.updatePermissions(f,binding.id(),new StaffBindingService.PermissionsInput(java.util.Set.of("TRANSFER_PAYOUT"),allowed.version()),owner,"Bearer fixture")).isInstanceOf(com.sporthub.common.exception.ConflictException.class);
+    }
     @Test void staffCannotEscalatePermissionsOrWriteAnotherFacility(){
         UUID f=UUID.randomUUID();var owner=staffOwner(f);var u=activate(uniqueEmail("staff-no-escalation"));var b=linkStaff(f,owner,u,java.util.Set.of("BOOKING_READ"));var p=staff.permissions(f,b.id(),owner,"Bearer fixture");
         for(String permission:java.util.List.of("OWNER","ADMIN","PRICING_MANAGE","REFUND"))assertThatThrownBy(()->staff.updatePermissions(f,b.id(),new StaffBindingService.PermissionsInput(java.util.Set.of(permission),p.version()),owner,"Bearer fixture")).isInstanceOf(IllegalArgumentException.class);

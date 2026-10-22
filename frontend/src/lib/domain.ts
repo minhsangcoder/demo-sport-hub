@@ -75,7 +75,7 @@ export type Hold = {
   id: string;
   courtId: string;
   facilityId: string;
-  holderId: string;
+  holderId: string | null;
   startsAt: string;
   endsAt: string;
   expiresAt: string;
@@ -86,8 +86,8 @@ export type Booking = {
   id: string;
   facilityId: string;
   courtId: string;
-  customerId: string;
-  currentHolderId: string;
+  customerId: string | null;
+  currentHolderId: string | null;
   createdBy: string;
   startsAt: string;
   endsAt: string;

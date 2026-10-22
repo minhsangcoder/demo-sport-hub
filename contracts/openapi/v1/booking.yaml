@@ -1656,6 +1656,877 @@
           }
         }
       }
+    },
+    "/bookings/reports/facility/{id}/dashboard": {
+      "get": {
+        "operationId": "ownerFacilityDashboard",
+        "summary": "Owner facility dashboard",
+        "description": "OWNER and current facility ownership only. DEMO application facts; no SportHub revenue. R/P paidAt, F committed handoffAt, N demo paidAt, H demo refundedAt. Single inclusive facility-IANA date range, default seven dates, max 366 calendar dates (DST supported). Missing evidence is PARTIAL/UNAVAILABLE, never a complete zero. Outstanding balances use min(endExclusive,asOf). Stable effectiveAt/id order on unchanged data; GET does not mutate.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "fromDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Inclusive facility calendar date. Supply both dates or neither; defaults to today and six previous dates."
+          },
+          {
+            "name": "toDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Inclusive facility calendar date; max 366 calendar dates, UTC bounds [from,to). Browser timezone is not used."
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-recorded application result. DEMO never requires a bank account or real funds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DemoFacilityDashboard"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid date pair, date range longer than 366 calendar dates, page or size"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Facility is outside ownership"
+          },
+          "503": {
+            "description": "Ownership cannot be verified"
+          }
+        }
+      }
+    },
+    "/bookings/reports/facility/{id}/transactions": {
+      "get": {
+        "operationId": "ownerFacilityTransactions",
+        "summary": "Owner facility transactions",
+        "description": "OWNER and current facility ownership only. DEMO application facts; no SportHub revenue. R/P paidAt, F committed handoffAt, N demo paidAt, H demo refundedAt. Single inclusive facility-IANA date range, default seven dates, max 366 calendar dates (DST supported). Missing evidence is PARTIAL/UNAVAILABLE, never a complete zero. Outstanding balances use min(endExclusive,asOf). Stable effectiveAt/id order on unchanged data; GET does not mutate.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "fromDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Inclusive facility calendar date. Supply both dates or neither; defaults to today and six previous dates."
+          },
+          {
+            "name": "toDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Inclusive facility calendar date; max 366 calendar dates, UTC bounds [from,to). Browser timezone is not used."
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-recorded application result. DEMO never requires a bank account or real funds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DemoReportPage"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid date pair, date range longer than 366 calendar dates, page or size"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Facility is outside ownership"
+          },
+          "503": {
+            "description": "Ownership cannot be verified"
+          }
+        }
+      }
+    },
+    "/bookings/counter": {
+      "post": {
+        "tags": [
+          "Booking"
+        ],
+        "summary": "Create counter booking using a reviewed refund policy",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CounterInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created or idempotently replayed booking",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Booking"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Unconfigured, missing or stale refund policy; no new hold or booking is committed"
+          }
+        }
+      }
+    },
+    "/bookings/facility/{id}/refund-policy-preflight": {
+      "get": {
+        "tags": [
+          "Booking"
+        ],
+        "summary": "Owner read-only legacy policy inventory; at most 1000 records",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scoped adoption evidence; no money movement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LegacyRefundPolicyCandidate"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bookings/{id}/refund-policy-adoptions": {
+      "post": {
+        "tags": [
+          "Booking"
+        ],
+        "summary": "Owner proposes explicit terms for eligible legacy booking",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scoped adoption evidence; no money movement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/LegacyRefundAdoptionOffer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LegacyRefundAdoptionInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bookings/refund-policy-adoptions/{id}": {
+      "get": {
+        "tags": [
+          "Booking"
+        ],
+        "summary": "Affected customer or actual Owner views adoption offer",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scoped adoption evidence; no money movement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/LegacyRefundAdoptionOffer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bookings/refund-policy-adoptions/{id}/consent": {
+      "post": {
+        "tags": [
+          "Booking"
+        ],
+        "summary": "Affected Customer accepts immutable offer; waits for all group participants",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scoped adoption evidence; no money movement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/LegacyRefundAdoptionOffer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bookings/demo-finance/facility/{id}": {
+      "get": {
+        "operationId": "facilityDemoFinance",
+        "description": "Owner or active scoped Staff with TRANSFER_PAYOUT or BOOKING_REFUND. Each grant exposes only its relevant obligations. Up to 200 recent obligations per kind; operational current state, independent from the historical report date filter.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-recorded application result. DEMO never requires a bank account or real funds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DemoFacilityFinance"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Wrong actor, facility or current grant"
+          },
+          "409": {
+            "description": "Stale terms, state or conflicting idempotency payload"
+          }
+        }
+      }
+    },
+    "/bookings/demo-finance/mine": {
+      "get": {
+        "operationId": "myDemoFinance",
+        "description": "Customer participant read only. Only own seller/buyer obligations and own refund allocations; walk-in Guest refunds never become the creating Staff personal money.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Server-recorded application result. DEMO never requires a bank account or real funds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DemoParticipantFinance"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Wrong actor, facility or current grant"
+          },
+          "409": {
+            "description": "Stale terms, state or conflicting idempotency payload"
+          }
+        }
+      }
+    },
+    "/bookings/demo-finance/settlements/{id}/pay-seller": {
+      "post": {
+        "operationId": "demoPaySeller",
+        "description": "Owner or active facility Staff TRANSFER_PAYOUT; no Customer/Admin execution. Server N=P-F and payee A. Direct PAID/paidAt/paidBy and append-only outcome in one transaction; FAILED retains debt and allows retry. B rights never wait for this command. N=0 NOT_REQUIRED has no money event.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            },
+            "description": "Keep the same key when retrying an ambiguous response. A definitive FAILED outcome may be retried with a new key."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DemoMoneyOutcome"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Server-recorded application result. DEMO never requires a bank account or real funds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DemoSettlement"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Wrong actor, facility or current grant"
+          },
+          "409": {
+            "description": "Stale terms, state or conflicting idempotency payload"
+          }
+        }
+      }
+    },
+    "/bookings/demo-finance/refunds/{id}/complete": {
+      "post": {
+        "operationId": "demoCompleteRefund",
+        "description": "Owner or active facility Staff BOOKING_REFUND. Direct REFUNDED/refundedAt/refundedBy, or FAILED retaining entitlement. Policy H uses accepted r; authoritative ABORTED after collection returns full P independent from x/r. Walk-in refund recipient is Guest, not Staff; H=0 NO_REFUND has no money event.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            },
+            "description": "Keep the same key when retrying an ambiguous response. A definitive FAILED outcome may be retried with a new key."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DemoMoneyOutcome"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Server-recorded application result. DEMO never requires a bank account or real funds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DemoRefund"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Wrong actor, facility or current grant"
+          },
+          "409": {
+            "description": "Stale terms, state or conflicting idempotency payload"
+          }
+        }
+      }
+    },
+    "/bookings/{id}/cancellation-quote": {
+      "post": {
+        "operationId": "demoCancellationQuote",
+        "description": "Current Customer/group organizer may request; Owner/Staff require BOOKING_REFUND. Before play only, not during transfer lock. Five-minute server quote from original actual payments/contributions S, or latest buyer purchase P after A→B→C. H=HALF_UP(base*r/10000); largest remainder group allocations, tie paymentId. Missing legacy policy/mode requires explicit review.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-recorded application result. DEMO never requires a bank account or real funds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DemoCancellationQuote"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Wrong actor, facility or current grant"
+          },
+          "409": {
+            "description": "Stale terms, state or conflicting idempotency payload"
+          }
+        }
+      }
+    },
+    "/bookings/{id}/cancel-with-policy": {
+      "post": {
+        "operationId": "demoCancelWithPolicy",
+        "description": "Atomic version/ownership/policy/expiry validation, CANCELLED and one DEMO refund entitlement. Customer requests cancellation only; facility executes money separately. Does not reverse F/N or refund original A after resale. Check-in and handoff share the court lock.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            },
+            "description": "Keep the same key when retrying an ambiguous response. A definitive FAILED outcome may be retried with a new key."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DemoCancellationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Server-recorded application result. DEMO never requires a bank account or real funds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DemoCancellationResult"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message",
+                    "data",
+                    "timestamp"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid or revoked session"
+          },
+          "403": {
+            "description": "Wrong actor, facility or current grant"
+          },
+          "409": {
+            "description": "Stale terms, state or conflicting idempotency payload"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1759,6 +2630,10 @@
             "items": {
               "$ref": "#/components/schemas/Slot"
             }
+          },
+          "refundPolicy": {
+            "$ref": "facility.yaml#/components/schemas/FacilityRefundPolicy",
+            "description": "Immutable terms accepted with the hold. Missing only on legacy quotes, which cannot create a new booking."
           }
         },
         "required": [
@@ -1848,7 +2723,8 @@
           },
           "holderId": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "nullable": true
           },
           "startsAt": {
             "type": "string",
@@ -1918,11 +2794,13 @@
           },
           "customerId": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "nullable": true
           },
           "currentHolderId": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "nullable": true
           },
           "createdBy": {
             "type": "string",
@@ -2688,6 +3566,1601 @@
             }
           }
         }
+      },
+      "FacilityReportMoneyClass": {
+        "type": "string",
+        "enum": [
+          "REAL",
+          "DEMO",
+          "UNKNOWN"
+        ]
+      },
+      "FacilityReportAvailability": {
+        "type": "string",
+        "enum": [
+          "COMPLETE",
+          "PARTIAL",
+          "UNAVAILABLE"
+        ]
+      },
+      "FacilityReportWindow": {
+        "type": "object",
+        "required": [
+          "fromDate",
+          "toDate",
+          "from",
+          "to",
+          "timezone",
+          "interval"
+        ],
+        "properties": {
+          "fromDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "toDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "interval": {
+            "type": "string",
+            "enum": [
+              "[from,to)"
+            ]
+          }
+        }
+      },
+      "FacilityReportCoverage": {
+        "type": "object",
+        "required": [
+          "source",
+          "availability",
+          "verifiedCount",
+          "unverifiedCount",
+          "capturedAt",
+          "reasons"
+        ],
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/FacilityReportAvailability"
+          },
+          "verifiedCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "unverifiedCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "capturedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "FacilityReportMoneyTotals": {
+        "type": "object",
+        "required": [
+          "currency",
+          "moneyClass",
+          "gross",
+          "policyRefundExecuted",
+          "afterRefund",
+          "refundDue",
+          "refundInFlight",
+          "refundFundingPending",
+          "reviewAmount",
+          "availability"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "moneyClass": {
+            "$ref": "#/components/schemas/FacilityReportMoneyClass"
+          },
+          "gross": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "example": "120000.00",
+            "nullable": true
+          },
+          "policyRefundExecuted": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "example": "120000.00",
+            "nullable": true
+          },
+          "afterRefund": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "example": "120000.00",
+            "nullable": true
+          },
+          "refundDue": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "example": "120000.00",
+            "nullable": true
+          },
+          "refundInFlight": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "example": "120000.00",
+            "nullable": true
+          },
+          "refundFundingPending": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "example": "120000.00",
+            "nullable": true
+          },
+          "reviewAmount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "example": "120000.00",
+            "nullable": true
+          },
+          "availability": {
+            "$ref": "#/components/schemas/FacilityReportAvailability"
+          }
+        }
+      },
+      "FacilityReportSummary": {
+        "type": "object",
+        "required": [
+          "bookingCount",
+          "fullyPaidBookingCount",
+          "bookedMinutes",
+          "usedMinutes",
+          "cancelledCount",
+          "expiredCount",
+          "money"
+        ],
+        "properties": {
+          "bookingCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "fullyPaidBookingCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bookedMinutes": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "example": "120000.00"
+          },
+          "usedMinutes": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "example": "120000.00"
+          },
+          "cancelledCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "expiredCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "money": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FacilityReportMoneyTotals"
+            }
+          }
+        }
+      },
+      "FacilityReportDaily": {
+        "type": "object",
+        "required": [
+          "date",
+          "money"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "money": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FacilityReportMoneyTotals"
+            }
+          }
+        }
+      },
+      "FacilityReportCourt": {
+        "type": "object",
+        "required": [
+          "courtId",
+          "courtName",
+          "bookingCount",
+          "fullyPaidBookingCount",
+          "bookedMinutes",
+          "usedMinutes",
+          "cancelledCount",
+          "expiredCount",
+          "money"
+        ],
+        "properties": {
+          "courtId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courtName": {
+            "type": "string"
+          },
+          "bookingCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "fullyPaidBookingCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bookedMinutes": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "example": "120000.00"
+          },
+          "usedMinutes": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "example": "120000.00"
+          },
+          "cancelledCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "expiredCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "money": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FacilityReportMoneyTotals"
+            }
+          }
+        }
+      },
+      "FacilityReportRefundPolicy": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "policyVersion",
+          "rateBps",
+          "baseAmount",
+          "targetAmount",
+          "reason",
+          "authorizedBy"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policyVersion": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rateBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "baseAmount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "example": "120000.00"
+          },
+          "targetAmount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "example": "120000.00"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "FACILITY_POLICY_CANCELLATION"
+            ]
+          },
+          "authorizedBy": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        }
+      },
+      "FacilityReportTransaction": {
+        "type": "object",
+        "required": [
+          "factId",
+          "kind",
+          "direction",
+          "effectiveAt",
+          "recordedAt",
+          "bookingId",
+          "bookingReference",
+          "courtId",
+          "courtName",
+          "startsAt",
+          "endsAt",
+          "source",
+          "purpose",
+          "paymentId",
+          "amount",
+          "currency",
+          "moneyClass",
+          "state",
+          "review",
+          "cancelled",
+          "refundPolicy"
+        ],
+        "properties": {
+          "factId": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "COURT_COLLECTION",
+              "FACILITY_POLICY_REFUND"
+            ]
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "IN",
+              "OUT"
+            ]
+          },
+          "effectiveAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "bookingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bookingReference": {
+            "type": "string"
+          },
+          "courtId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courtName": {
+            "type": "string"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "paymentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "example": "120000.00"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "moneyClass": {
+            "$ref": "#/components/schemas/FacilityReportMoneyClass"
+          },
+          "state": {
+            "type": "string"
+          },
+          "review": {
+            "type": "boolean"
+          },
+          "cancelled": {
+            "type": "boolean"
+          },
+          "refundPolicy": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FacilityReportRefundPolicy"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "FacilityReportTransactions": {
+        "type": "object",
+        "required": [
+          "window",
+          "asOf",
+          "sourceCoverage",
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "window": {
+            "$ref": "#/components/schemas/FacilityReportWindow"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sourceCoverage": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FacilityReportCoverage"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FacilityReportTransaction"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "FacilityReportDashboard": {
+        "type": "object",
+        "required": [
+          "facilityId",
+          "window",
+          "asOf",
+          "dateBasis",
+          "sourceCoverage",
+          "moneyAvailability",
+          "summary",
+          "collectionsByDay",
+          "courtPerformance",
+          "statusBreakdown",
+          "transactions"
+        ],
+        "properties": {
+          "facilityId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "window": {
+            "$ref": "#/components/schemas/FacilityReportWindow"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dateBasis": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "sourceCoverage": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FacilityReportCoverage"
+            }
+          },
+          "moneyAvailability": {
+            "$ref": "#/components/schemas/FacilityReportAvailability"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/FacilityReportSummary"
+          },
+          "collectionsByDay": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FacilityReportDaily"
+            }
+          },
+          "courtPerformance": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FacilityReportCourt"
+            }
+          },
+          "statusBreakdown": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          "transactions": {
+            "$ref": "#/components/schemas/FacilityReportTransactions"
+          }
+        }
+      },
+      "CounterInput": {
+        "type": "object",
+        "required": [
+          "courtId",
+          "startsAt",
+          "endsAt",
+          "expectedAmount",
+          "guestName",
+          "guestPhone"
+        ],
+        "properties": {
+          "courtId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expectedAmount": {
+            "type": "number"
+          },
+          "guestName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 180
+          },
+          "guestPhone": {
+            "type": "string",
+            "pattern": "^\\+?[0-9]{8,15}$"
+          },
+          "paymentMethod": {
+            "type": "string",
+            "enum": [
+              "DEMO"
+            ]
+          },
+          "refundPolicyHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "Required for new atomic counter bookings. Review the public facility policy first; a missing/stale hash returns 409. Omission is accepted only when replaying an already-created legacy booking with its original key and payload."
+          }
+        }
+      },
+      "LegacyRefundAdoptionInput": {
+        "type": "object",
+        "required": [
+          "expectedBookingVersion",
+          "policyHash",
+          "reason"
+        ],
+        "properties": {
+          "expectedBookingVersion": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "policyHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "guestConsentReference": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 500
+          }
+        }
+      },
+      "LegacyRefundAdoptionOffer": {
+        "type": "object",
+        "required": [
+          "id",
+          "bookingId",
+          "bookingVersion",
+          "policy",
+          "requiredUsers",
+          "consentedUsers",
+          "reason",
+          "expiresAt",
+          "adopted"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bookingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bookingVersion": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "policy": {
+            "$ref": "facility.yaml#/components/schemas/FacilityRefundPolicy"
+          },
+          "requiredUsers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "consentedUsers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "reason": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "adopted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "LegacyRefundPolicyCandidate": {
+        "type": "object",
+        "required": [
+          "bookingId",
+          "status",
+          "amount",
+          "reasons"
+        ],
+        "properties": {
+          "bookingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "DemoMoneyOutcome": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "SUCCESS",
+              "FAILED"
+            ]
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "description": "Only outcome is client-selected. Amount, recipient, facility, mode and immutable entitlement are resolved by the server. Only DEMO records are executable."
+      },
+      "DemoRefundAllocation": {
+        "type": "object",
+        "properties": {
+          "paymentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "payerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "baseAmount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "refundAmount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          }
+        },
+        "required": [
+          "paymentId",
+          "payerId",
+          "baseAmount",
+          "refundAmount"
+        ]
+      },
+      "DemoSettlement": {
+        "type": "object",
+        "properties": {
+          "acquisitionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bookingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "facilityId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courtId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "receiverOwnerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sellerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "buyerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "paymentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "DEMO"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "VND"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "feeBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "readOnly": true
+          },
+          "policyVersion": {
+            "type": "integer",
+            "format": "int64",
+            "readOnly": true
+          },
+          "feeAmount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "sellerNetAmount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "payoutState": {
+            "type": "string",
+            "enum": [
+              "UNPAID",
+              "FAILED",
+              "PAID",
+              "NOT_REQUIRED"
+            ]
+          },
+          "handoffAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "paidAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "performedBy": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "readOnly": true
+          }
+        },
+        "required": [
+          "acquisitionId",
+          "bookingId",
+          "facilityId",
+          "mode",
+          "amount",
+          "feeBps",
+          "feeAmount",
+          "sellerNetAmount",
+          "payoutState",
+          "handoffAt"
+        ]
+      },
+      "DemoRefund": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bookingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "facilityId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courtId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "acquisitionId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "quoteId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "DEMO"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "VND"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "POLICY_CANCELLATION",
+              "TECHNICAL_TRANSFER_FAILURE"
+            ]
+          },
+          "baseAmount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "rateBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "readOnly": true
+          },
+          "targetAmount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "allocations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DemoRefundAllocation"
+            }
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "FAILED",
+              "REFUNDED",
+              "NO_REFUND"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "refundedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "recipientKind": {
+            "type": "string",
+            "enum": [
+              "GUEST"
+            ]
+          },
+          "recipientLabel": {
+            "type": "string"
+          },
+          "yourRefundAmount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "performedBy": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "readOnly": true
+          }
+        },
+        "required": [
+          "id",
+          "bookingId",
+          "facilityId",
+          "mode",
+          "reason",
+          "baseAmount",
+          "rateBps",
+          "targetAmount",
+          "allocations",
+          "state",
+          "createdAt"
+        ]
+      },
+      "DemoFacilityFinance": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "DEMO"
+            ]
+          },
+          "canPaySeller": {
+            "type": "boolean"
+          },
+          "canRefund": {
+            "type": "boolean"
+          },
+          "settlements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DemoSettlement"
+            }
+          },
+          "refunds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DemoRefund"
+            }
+          }
+        },
+        "required": [
+          "mode",
+          "canPaySeller",
+          "canRefund",
+          "settlements",
+          "refunds"
+        ]
+      },
+      "DemoParticipantFinance": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "DEMO"
+            ]
+          },
+          "settlements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DemoSettlement"
+            }
+          },
+          "refunds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DemoRefund"
+            }
+          }
+        },
+        "required": [
+          "mode",
+          "settlements",
+          "refunds"
+        ]
+      },
+      "DemoCancellationQuote": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bookingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "DEMO"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "VND"
+            ]
+          },
+          "baseAmount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "rateBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "readOnly": true
+          },
+          "targetAmount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "policyVersion": {
+            "type": "integer",
+            "format": "int64",
+            "readOnly": true
+          },
+          "allocations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DemoRefundAllocation"
+            }
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "bookingId",
+          "mode",
+          "currency",
+          "baseAmount",
+          "rateBps",
+          "targetAmount",
+          "policyVersion",
+          "allocations",
+          "expiresAt"
+        ]
+      },
+      "DemoCancellationInput": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "quoteId",
+          "reason"
+        ]
+      },
+      "DemoCancellationResult": {
+        "type": "object",
+        "properties": {
+          "bookingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "CANCELLED"
+            ]
+          },
+          "refund": {
+            "$ref": "#/components/schemas/DemoRefund"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "DEMO"
+            ]
+          }
+        },
+        "required": [
+          "bookingId",
+          "status",
+          "refund",
+          "mode"
+        ]
+      },
+      "DemoReportMoney": {
+        "type": "object",
+        "properties": {
+          "courtCollected": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "transferFees": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "operatingRevenue": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "policyRefunded": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "afterRefund": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "transferCollected": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "sellerPaid": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "sellerDue": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "refundDue": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "technicalRefunded": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          }
+        },
+        "required": [
+          "courtCollected",
+          "transferFees",
+          "operatingRevenue",
+          "policyRefunded",
+          "afterRefund",
+          "transferCollected",
+          "sellerPaid",
+          "sellerDue",
+          "refundDue",
+          "technicalRefunded"
+        ],
+        "description": "R courtCollected, F transferFees, H successful policyRefunded. operatingRevenue=R+F; afterRefund=R+F-H. P transferCollected and N sellerPaid are separate cashflow. Technical refunds are separate from H. Due balances include older liabilities before obligationCutoff."
+      },
+      "DemoReportSummary": {
+        "type": "object",
+        "properties": {
+          "bookingCount": {
+            "type": "integer"
+          },
+          "fullyPaidBookingCount": {
+            "type": "integer"
+          },
+          "bookedMinutes": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "usedMinutes": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "cancelledCount": {
+            "type": "integer"
+          },
+          "expiredCount": {
+            "type": "integer"
+          },
+          "money": {
+            "$ref": "#/components/schemas/DemoReportMoney"
+          }
+        },
+        "required": [
+          "bookingCount",
+          "fullyPaidBookingCount",
+          "bookedMinutes",
+          "usedMinutes",
+          "cancelledCount",
+          "expiredCount",
+          "money"
+        ]
+      },
+      "DemoReportCourt": {
+        "type": "object",
+        "properties": {
+          "courtId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courtName": {
+            "type": "string"
+          },
+          "bookingCount": {
+            "type": "integer"
+          },
+          "fullyPaidBookingCount": {
+            "type": "integer"
+          },
+          "bookedMinutes": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "usedMinutes": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "cancelledCount": {
+            "type": "integer"
+          },
+          "expiredCount": {
+            "type": "integer"
+          },
+          "money": {
+            "$ref": "#/components/schemas/DemoReportMoney"
+          }
+        },
+        "required": [
+          "courtId",
+          "courtName",
+          "bookingCount",
+          "fullyPaidBookingCount",
+          "bookedMinutes",
+          "usedMinutes",
+          "cancelledCount",
+          "expiredCount",
+          "money"
+        ]
+      },
+      "DemoReportDay": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "courtCollected": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "transferFees": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "policyRefunded": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          }
+        },
+        "required": [
+          "date",
+          "courtCollected",
+          "transferFees",
+          "policyRefunded"
+        ]
+      },
+      "DemoReportTransaction": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "COURT_COLLECTION",
+              "TRANSFER_COLLECTION",
+              "FACILITY_TRANSFER_FEE",
+              "SELLER_PAYOUT",
+              "POLICY_REFUND",
+              "TECHNICAL_REFUND"
+            ]
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "IN",
+              "OUT",
+              "RECOGNITION"
+            ]
+          },
+          "revenueComponent": {
+            "type": "boolean"
+          },
+          "cashflow": {
+            "type": "boolean"
+          },
+          "countsTowardTotals": {
+            "type": "boolean"
+          },
+          "bookingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courtId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courtName": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "SUCCESS",
+              "FAILED"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "VND"
+            ]
+          },
+          "effectiveAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "direction",
+          "revenueComponent",
+          "cashflow",
+          "countsTowardTotals",
+          "bookingId",
+          "courtId",
+          "courtName",
+          "source",
+          "purpose",
+          "state",
+          "amount",
+          "currency",
+          "effectiveAt"
+        ]
+      },
+      "DemoReportPage": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "totalPages": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DemoReportTransaction"
+            }
+          }
+        },
+        "required": [
+          "page",
+          "size",
+          "total",
+          "totalPages",
+          "items"
+        ]
+      },
+      "DemoFacilityDashboard": {
+        "type": "object",
+        "properties": {
+          "facilityId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "window": {
+            "$ref": "#/components/schemas/FacilityReportWindow"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "obligationCutoff": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "DEMO"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "dateBasis": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "moneyAvailability": {
+            "type": "string",
+            "enum": [
+              "COMPLETE",
+              "PARTIAL",
+              "UNAVAILABLE"
+            ]
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "$ref": "#/components/schemas/DemoReportSummary"
+          },
+          "daily": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DemoReportDay"
+            }
+          },
+          "courts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DemoReportCourt"
+            }
+          },
+          "transactions": {
+            "$ref": "#/components/schemas/DemoReportPage"
+          }
+        },
+        "required": [
+          "facilityId",
+          "window",
+          "asOf",
+          "obligationCutoff",
+          "mode",
+          "label",
+          "dateBasis",
+          "moneyAvailability",
+          "reasons",
+          "summary",
+          "daily",
+          "courts",
+          "transactions"
+        ]
       }
     }
   },

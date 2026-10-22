@@ -335,7 +335,7 @@ function HoldConfirmation({ hold: h }: { hold: Hold }) {
           >
             Bỏ giữ chỗ, chọn lại lịch
           </Button>
-          <Link className="text-link small" href="/customer/bookings">
+          <Link className="text-link small" href={counter ? "/staff/bookings" : "/customer/bookings"}>
             Xem lịch đã đặt
           </Link>
         </Panel>
@@ -375,7 +375,7 @@ export function BookingDetailPage({
   const group = resource.data?.history.some(
     (x) => x.action === "GROUP_CREATED",
   );
-  const owned = b?.currentHolderId === user?.id;
+  const owned = Boolean(user?.id && b?.currentHolderId === user.id);
   useEffect(() => {
     if (!resource.data?.checkinToken || b?.status !== "CONFIRMED") return;
     const timer = setInterval(resource.reload, 60000);
@@ -541,19 +541,25 @@ export function BookingDetailPage({
                       onSubmit={(e) => {
                         e.preventDefault();
                         const f = new FormData(e.currentTarget);
+                        const tokenVal = String(f.get("token") || "").trim();
                         void action.run(
                           () =>
-                            api(`/bookings/${id}/check-in`, {
-                              method: "POST",
-                              body: JSON.stringify({ token: f.get("token") }),
-                            }),
+                            /^[0-9A-Fa-f]{10}$/.test(tokenVal)
+                              ? api(`/facility/${b.facilityId}/check-in-by-code`, {
+                                  method: "POST",
+                                  body: JSON.stringify({ bookingCode: tokenVal.toUpperCase() }),
+                                })
+                              : api(`/bookings/${id}/check-in`, {
+                                  method: "POST",
+                                  body: JSON.stringify({ token: tokenVal }),
+                                }),
                           () => resource.reload(),
                         );
                       }}
                     >
                       <Field
                         name="token"
-                        label="Mã check-in từ khách"
+                        label="Mã check-in từ khách (10 ký tự hoặc mã QR)"
                         maxLength={500}
                         required
                       />
@@ -655,11 +661,14 @@ function PaymentDetails({
   action: ReturnType<typeof useAction>;
 }) {
   const countdown = useCountdown(p.expiresAt);
+  const { user } = useAuth();
   const href = p.acquisitionId
     ? `/customer/transfers/acquisitions/${p.acquisitionId}`
     : p.memberId
       ? `/customer/groups/${p.bookingId}`
-      : `/customer/bookings/${p.bookingId}`;
+      : user?.roles.includes("STAFF")
+        ? `/staff/bookings/${p.bookingId}`
+        : `/customer/bookings/${p.bookingId}`;
   return (
     <>
       <PageHead

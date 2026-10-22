@@ -12,7 +12,7 @@ class PaymentReliabilityMigrationTest {
             String schema="payment_upgrade_"+UUID.randomUUID().toString().replace("-","");before(url,user,password,schema);
             try(var c=DriverManager.getConnection(url,user,password);var s=c.createStatement()){
                 s.execute("SET search_path TO "+schema+",public");seed(s,UUID.randomUUID(),"SUCCESS",true);
-                var f=Flyway.configure().dataSource(url,user,password).schemas(schema).defaultSchema(schema).load();f.migrate();f.validate();assertThat(f.info().current().getVersion().toString()).isEqualTo("9");
+                var f=Flyway.configure().dataSource(url,user,password).schemas(schema).defaultSchema(schema).load();f.migrate();f.validate();assertThat(f.info().current().getVersion().toString()).isEqualTo("14");
                 try(var r=s.executeQuery("SELECT p.status,p.amount,p.paid_at IS NOT NULL,o.settled_payment_id=p.id,s.state,s.last_error_code FROM payment_orders p JOIN payment_obligations o ON o.current_payment_id=p.id JOIN payment_booking_sync s ON s.payment_id=p.id")){
                     r.next();assertThat(r.getString(1)).isEqualTo("SUCCESS");assertThat(r.getBigDecimal(2)).isEqualByComparingTo("100000.25");assertThat(r.getBoolean(3)).isTrue();assertThat(r.getBoolean(4)).isTrue();assertThat(r.getString(5)).isEqualTo("REQUIRES_REVIEW");assertThat(r.getString(6)).isEqualTo("LEGACY_OUTBOX_MISSING");
                 }

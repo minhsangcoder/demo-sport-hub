@@ -15,7 +15,7 @@ import java.util.*;
 
 @Service @Transactional(readOnly=true)
 public class StaffBindingService {
- public static final Set<String> PERMISSIONS=Set.of("BOOKING_READ","BOOKING_CREATE_COUNTER","BOOKING_PAYMENT_COUNTER","BOOKING_CHECK_IN","SCHEDULE_READ","SCHEDULE_MANAGE","COURT_STATUS_MANAGE","COURT_MAINTENANCE_MANAGE");
+ public static final Set<String> PERMISSIONS=Set.of("BOOKING_READ","BOOKING_CREATE_COUNTER","BOOKING_PAYMENT_COUNTER","BOOKING_CHECK_IN","BOOKING_REFUND","TRANSFER_PAYOUT","SCHEDULE_READ","SCHEDULE_MANAGE","COURT_STATUS_MANAGE","COURT_MAINTENANCE_MANAGE");
  private final JdbcTemplate jdbc;private final StaffFacilityAccess access;private final UserSecurityLock security;private final ObjectMapper json;private final Validator validator;private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
  public StaffBindingService(JdbcTemplate jdbc,StaffFacilityAccess access,UserSecurityLock security,ObjectMapper json,Validator validator,org.springframework.security.crypto.password.PasswordEncoder passwordEncoder){this.jdbc=jdbc;this.access=access;this.security=security;this.json=json;this.validator=validator;this.passwordEncoder=passwordEncoder;}
  public record Input(@NotBlank @Size(max=255) String identifier,@NotEmpty Set<@NotBlank String> permissions){}

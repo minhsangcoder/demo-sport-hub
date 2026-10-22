@@ -173,6 +173,7 @@ function LoadedShell({
             { suffix: '/staff', label: 'Nhân viên cơ sở', icon: Users },
             { suffix: '/documents', label: 'Tài liệu & Giấy phép', icon: FileText },
             { suffix: '/transfer-policy', label: 'Chính sách chuyển nhượng', icon: Repeat },
+             { suffix: '/refund-policy', label: 'Chính sách hoàn tiền', icon: FileText },
             { suffix: '/reports', label: 'Báo cáo & Doanh thu', icon: BarChart3 },
           ],
         },

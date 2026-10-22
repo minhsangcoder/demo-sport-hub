@@ -131,4 +131,12 @@
         </pluginManagement>
     </build>
 
+    <profiles>
+        <profile>
+            <id>ownership-test-artifact</id>
+            <build>
+                <finalName>${project.artifactId}-${project.version}-ownership-test</finalName>
+            </build>
+        </profile>
+    </profiles>
 </project>

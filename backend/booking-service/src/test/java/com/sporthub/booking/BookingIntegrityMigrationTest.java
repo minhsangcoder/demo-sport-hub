@@ -16,7 +16,7 @@ class BookingIntegrityMigrationTest {
                 s.execute("SET search_path TO "+schema+",public");seed(s,false);
                 s.execute("INSERT INTO request_idempotency(actor_id,operation,key,fingerprint,resource_id) SELECT created_by,'BOOKING','legacy-key','"+"0".repeat(64)+"',id FROM bookings");
                 var latest=Flyway.configure().dataSource(url,user,password).schemas(schema).defaultSchema(schema).load();latest.migrate();latest.validate();
-                assertThat(latest.info().current().getVersion().toString()).isEqualTo("10");
+                assertThat(latest.info().current().getVersion().toString()).isEqualTo("16");
                 try(var r=s.executeQuery("SELECT amount,price_snapshot->>'marker',b.hold_expires_at=r.expires_at FROM bookings b JOIN slot_reservations r ON r.id=b.reservation_id")){
                     assertThat(r.next()).isTrue();assertThat(r.getBigDecimal(1)).isEqualByComparingTo("120000.25");assertThat(r.getString(2)).isEqualTo("legacy");assertThat(r.getBoolean(3)).isTrue();
                 }
@@ -49,7 +49,7 @@ class BookingIntegrityMigrationTest {
     private interface DatabaseCheck{void run(String url,String user,String password)throws Exception;}
     private void withDatabase(DatabaseCheck check)throws Exception{
         PostgreSQLContainer<?> pg=null;String url=System.getenv("SPORTHUB_BOOKING_TEST_DB_URL"),user=System.getenv("SPORTHUB_TEST_DB_USER"),password=System.getenv("SPORTHUB_TEST_DB_PASSWORD");
-        if(url==null){pg=new PostgreSQLContainer<>("postgres:16-alpine");pg.start();url=pg.getJdbcUrl();user=pg.getUsername();password=pg.getPassword();}
+        if(url==null){pg=new PostgreSQLContainer<>("postgres:16-alpine").withInitScript("booking-test-prerequisites.sql");pg.start();url=pg.getJdbcUrl();user=pg.getUsername();password=pg.getPassword();}
         try{check.run(url,user,password);}finally{if(pg!=null)pg.stop();}
     }
 }

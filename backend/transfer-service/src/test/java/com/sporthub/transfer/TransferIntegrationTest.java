@@ -19,7 +19,7 @@ import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.*;
 
-@SpringBootTest(properties={"spring.rabbitmq.username=test","spring.rabbitmq.password=test","spring.rabbitmq.listener.simple.auto-startup=false","SERVICE_CALL_SECRET=test-private-service-key-longer-than-thirty-two-characters","sporthub.events.outbox.enabled=false","transfer.workflow-delay-ms=3600000"})
+@SpringBootTest(properties={"transfer.finance.enabled=false","spring.rabbitmq.username=test","spring.rabbitmq.password=test","spring.rabbitmq.listener.simple.auto-startup=false","SERVICE_CALL_SECRET=test-private-service-key-longer-than-thirty-two-characters","sporthub.events.outbox.enabled=false","transfer.workflow-delay-ms=3600000"})
 @org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 class TransferIntegrationTest {
  static PostgreSQLContainer<?> postgres;

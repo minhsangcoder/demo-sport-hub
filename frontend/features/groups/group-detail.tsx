@@ -25,6 +25,8 @@ import type { Payment } from '@/features/booking/types'
 import { type Group, groupStates } from './types'
 import { GroupExtras } from '@/features/integration/group'
 import { GroupPaymentTracking } from './payment-tracking'
+import { RefundPolicyNotice } from '@/features/booking/refund-policy-notice'
+import { ParticipantDemoMoney, PolicyCancellationPanel } from '@/features/booking/demo-finance'
 import { useHiddenGroups } from './hidden-groups'
 import { DeleteGroupDialog } from './delete-group-dialog'
 
@@ -303,17 +305,11 @@ function Loaded({ id }: { id: string }) {
               {g.allocationsLocked ? 'Điều chỉnh phân chia' : 'Phân chia chi phí'}
             </Link>
           )}
-          <Button
-            variant="outline"
-            disabled={busy || locked}
-            onClick={() => act('cancel')}
-            className="rounded-full border-slate-200 text-sm font-semibold hover:bg-rose-50 hover:text-rose-700"
-          >
-            Hủy nhóm
-          </Button>
         </nav>
       )}
 
+      {owner && ['PENDING','CONFIRMED'].includes(g.booking.status) && <PolicyCancellationPanel bookingId={id} onSuccess={r.reload}/>}
+      <ParticipantDemoMoney bookingId={id}/>
       {/* Errors */}
       {(error || r.error) && (
         <p
@@ -325,6 +321,7 @@ function Loaded({ id }: { id: string }) {
       )}
 
       {/* Payment Tracking */}
+      <RefundPolicyNotice policy={g.booking.priceSnapshot.refundPolicy} />
       <GroupPaymentTracking
         group={g}
         userId={user?.id}

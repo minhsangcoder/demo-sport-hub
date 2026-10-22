@@ -58,7 +58,7 @@ class GroupIntegrityMigrationTest {
     private interface DatabaseCheck{void run(String url,String user,String password)throws Exception;}
     private void withDatabase(DatabaseCheck check)throws Exception{
         PostgreSQLContainer<?> pg=null;String url=System.getenv("SPORTHUB_BOOKING_TEST_DB_URL"),user=System.getenv("SPORTHUB_TEST_DB_USER"),password=System.getenv("SPORTHUB_TEST_DB_PASSWORD");
-        if(url==null){pg=new PostgreSQLContainer<>("postgres:16-alpine");pg.start();url=pg.getJdbcUrl();user=pg.getUsername();password=pg.getPassword();}
+        if(url==null){pg=new PostgreSQLContainer<>("postgres:16-alpine").withInitScript("booking-test-prerequisites.sql");pg.start();url=pg.getJdbcUrl();user=pg.getUsername();password=pg.getPassword();}
         try{check.run(url,user,password);}finally{if(pg!=null)pg.stop();}
     }
 }
