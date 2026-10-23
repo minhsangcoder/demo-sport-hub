@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 
 const STORAGE_PREFIX = 'sporthub_hidden_groups_'
 
@@ -67,43 +67,44 @@ export function isGroupHidden(groupId: string, userId?: string): boolean {
 /**
  * React hook to access and manage hidden groups state with real-time sync.
  */
+function subscribe(listener: () => void) {
+  window.addEventListener('storage', listener)
+  window.addEventListener('sporthub_hidden_groups_changed', listener)
+  return () => {
+    window.removeEventListener('storage', listener)
+    window.removeEventListener('sporthub_hidden_groups_changed', listener)
+  }
+}
+const serverSnapshot = () => ''
 export function useHiddenGroups(userId?: string) {
-  const [hiddenIds, setHiddenIds] = useState<string[]>([])
-
-  const refresh = useCallback(() => {
-    setHiddenIds(getHiddenGroupIds(userId))
+  const snapshot = useCallback(() => {
+    try {
+      return localStorage.getItem(getStorageKey(userId)) ?? ''
+    } catch {
+      return ''
+    }
   }, [userId])
-
-  useEffect(() => {
-    refresh()
-
-    function onStorageChanged() {
-      refresh()
-    }
-
-    window.addEventListener('storage', onStorageChanged)
-    window.addEventListener('sporthub_hidden_groups_changed', onStorageChanged)
-
-    return () => {
-      window.removeEventListener('storage', onStorageChanged)
-      window.removeEventListener('sporthub_hidden_groups_changed', onStorageChanged)
-    }
-  }, [refresh])
+  const raw = useSyncExternalStore(subscribe, snapshot, serverSnapshot)
+  let hiddenIds: string[] = []
+  try {
+    const parsed = JSON.parse(raw || '[]')
+    if (Array.isArray(parsed)) hiddenIds = parsed
+  } catch {
+    /* Invalid local preference behaves as an empty list. */
+  }
 
   const hide = useCallback(
     (groupId: string) => {
       hideGroup(groupId, userId)
-      refresh()
     },
-    [userId, refresh]
+    [userId],
   )
 
   const unhide = useCallback(
     (groupId: string) => {
       unhideGroup(groupId, userId)
-      refresh()
     },
-    [userId, refresh]
+    [userId],
   )
 
   return {

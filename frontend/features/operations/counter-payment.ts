@@ -1,5 +1,5 @@
-import { api } from '@/lib/api'
-import type { Booking, BookingDetail, Payment } from '@/features/booking/types'
+import type { Booking,BookingDetail,Payment } from '@/features/booking/types';
+import { api } from '@/lib/api';
 
 type Attempt = { key: string; payment?: Payment; completed: boolean }
 
@@ -26,16 +26,16 @@ export class CounterPaymentSession {
       })
       if (payment.status === 'FAILED' || payment.status === 'EXPIRED') {
         this.attempts.delete(identity)
-        throw new Error('Thanh toán DEMO thất bại hoặc hết hạn. Bạn có thể thử lại.')
+        throw new Error('Thanh toán mô phỏng thất bại hoặc hết hạn. Bạn có thể thử lại.')
       }
-      if (payment.status !== 'SUCCESS') throw new Error('Thanh toán DEMO chưa được xác nhận. Hãy thử kiểm tra lại.')
+      if (payment.status !== 'SUCCESS') throw new Error('Thanh toán mô phỏng chưa được xác nhận. Hãy thử kiểm tra lại.')
       attempt.payment = payment
       attempt.completed = true
     }
     for (let i = 0; i < 15; i++) {
       const detail = await api<BookingDetail>(`/bookings/${booking.id}`)
       if (detail.booking.status === 'CONFIRMED') return true
-      if (detail.booking.status !== 'PENDING') throw new Error('Booking không còn chờ xác nhận. Vui lòng kiểm tra lịch sử và đối soát thanh toán.')
+      if (detail.booking.status !== 'PENDING') throw new Error('Lượt đặt không còn chờ xác nhận. Vui lòng kiểm tra lịch sử và đối soát thanh toán.')
       if (i < 14) await new Promise(resolve => setTimeout(resolve, 600))
     }
     return false

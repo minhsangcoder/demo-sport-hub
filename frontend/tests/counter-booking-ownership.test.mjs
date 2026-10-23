@@ -37,13 +37,13 @@ function harness({user={id:'staff',roles:['STAFF','CUSTOMER']},api=async()=>({})
     const file=path.resolve(root,relative)
     if(cache.has(file))return cache.get(file)
     const exports={};cache.set(file,exports)
-    if(!compile.has(file))compile.set(file,ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText)
+    if(!compile.has(file))compile.set(file,ts.transpileModule(readFileSync(file,'utf8'),{fileName:file,compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText)
     vm.runInNewContext(compile.get(file),{exports,Error,URL,URLSearchParams,Headers,FormData,Response,crypto:{randomUUID},
       setTimeout:callback=>{callback();return 1},setInterval:()=>1,clearInterval(){},...globals,
       require(name){
         if(Object.hasOwn(stub,name))return stub[name]
         let resolved=name.startsWith('@/')?path.resolve(root,name.slice(2)):path.resolve(path.dirname(file),name)
-        if(!path.extname(resolved))resolved+=existsSync(resolved+'.ts')?'.ts':'.tsx'
+        if(!existsSync(resolved))resolved+=existsSync(resolved+'.ts')?'.ts':'.tsx'
         return load(path.relative(root,resolved))
       },
     },{filename:file})
@@ -96,13 +96,13 @@ test('operational guest detail exposes the operational code, submits once and re
   const h=harness({api:async(url,options)=>{requests.push({url,body:JSON.parse(options.body)});await pending;b={...b,status:'CHECKED_IN'};return b},resource:url=>url==='/users/me/access'?{facilityBindings:[{facilityId:b.facilityId,permissions:['BOOKING_READ','BOOKING_CHECK_IN']}]}:url?.endsWith('/operations')?{detail:{booking:b,history:[]},statusAudit:[]}:undefined,globals:{reload(){reloads++}}})
   const {OperationalDetail}=h.load('features/integration/operations.tsx')
   let tree=h.render(OperationalDetail,{id:b.id})
-  assert.match(text(tree),/Khách vãng lai/);assert.match(text(tree),/Khách lúc đặt: Synthetic Guest/);assert.match(text(tree),/Mã check-in vận hành:\s+ABCDEF1234/)
+  assert.match(text(tree),/Khách vãng lai/);assert.match(text(tree),/Khách lúc đặt: Synthetic Guest/);assert.match(text(tree),/Mã xác nhận vào sân vận hành:\s+ABCDEF1234/)
   nodes(tree,n=>n.type==='input'&&n.props.name==='token')[0].props.onChange({target:{value:'abcdef1234'}})
   tree=h.render(OperationalDetail,{id:b.id});const submit=nodes(tree,n=>n.type==='form')[0].props.onSubmit
   submit(event);submit(event)
   assert.equal(requests.length,1);assert.equal(requests[0].url,'/bookings/facility/facility-A/check-in-by-code')
   release();await flush();tree=h.render(OperationalDetail,{id:b.id})
-  assert.equal(reloads,1);assert.match(text(tree),/CHECKED_IN/);assert.equal(nodes(tree,n=>n.type==='form').length,0)
+  assert.equal(reloads,1);assert.match(text(tree),/Đang chơi/);assert.equal(nodes(tree,n=>n.type==='form').length,0)
 })
 
 test('read-only staff can read the operational code but cannot check in or pay another operator booking',()=>{
@@ -139,7 +139,7 @@ test('counter payment keys differ across bookings and actual detail shape confir
   }
   assert.equal(creates.length,2);assert.notEqual(creates[0].key,creates[1].key)
   assert.equal(completed,2);assert.equal(gets,2);assert.equal(closed,2)
-  assert.ok(messages.every(message=>message.includes('DEMO')&&message.includes('đã được xác nhận')))
+  assert.ok(messages.every(message=>message.includes('mô phỏng')&&message.includes('đã được xác nhận')))
 })
 
 test('payment waits for confirmation, retains the attempt across close/reopen, and blocks double submit',async()=>{
@@ -200,7 +200,7 @@ test('the operational list exposes guest codes and uses the same scoped manual r
   const b=booking();const requests=[]
   const h=harness({api:async(url,options)=>{requests.push({url,body:JSON.parse(options.body)});return{...b,status:'CHECKED_IN'}},resource:url=>url==='/users/me/access'?{facilityBindings:[{facilityId:b.facilityId,permissions:['BOOKING_READ','BOOKING_CHECK_IN']}]}:url==='/facilities'?[{id:b.facilityId,name:'Facility'}]:url?.startsWith('/bookings/management/search')?{items:[b],total:1,totalPages:1}:undefined})
   const {OperationBookings}=h.load('features/operations/bookings-page.tsx');let tree=h.render(OperationBookings,{})
-  assert.match(text(tree),/Mã check-in vận hành:\s+ABCDEF1234/)
+  assert.match(text(tree),/Mã xác nhận vào sân vận hành:\s+ABCDEF1234/)
   nodes(tree,n=>n.type==='input'&&n.props.name==='token')[0].props.onChange({target:{value:'abcdef1234'}})
   tree=h.render(OperationBookings,{});nodes(tree,n=>n.type==='form')[0].props.onSubmit(event);await flush()
   assert.equal(requests[0].url,'/bookings/facility/facility-A/check-in-by-code');assert.deepEqual(requests[0].body,{bookingCode:'ABCDEF1234'})
@@ -218,9 +218,9 @@ test('personal detail keeps QR and transfer for real owners while hiding them fo
     const b=booking('personal',{source:example.source,currentHolderId:example.owner,customerId:example.owner})
     const h=harness({user:{id:'staff',roles:example.roles},resource:url=>url==='/bookings/personal'?{booking:b,history:[],checkinToken:'signed_payload.signature',checkinQrSvg:'<svg/>'}:undefined})
     const {BookingDetailPage}=h.load('features/booking/booking-detail.tsx');const tree=h.render(BookingDetailPage,{id:b.id})
-    assert.equal(nodes(tree,n=>n.type==='img'&&n.props.alt==='QR check-in booking').length,example.expected?1:0)
+    assert.equal(nodes(tree,n=>n.type==='img'&&n.props.alt==='QR xác nhận vào sân lượt đặt').length,example.expected?1:0)
     assert.equal(nodes(tree,n=>n.type==='a'&&n.props.href==='/customer/bookings/personal/transfer').length,example.expected?1:0)
-    assert.equal(text(tree).includes('Mã check-in thủ công'),example.expected)
+    assert.equal(text(tree).includes('Mã xác nhận vào sân thủ công'),example.expected)
     const back=nodes(tree,n=>n.type==='a'&&text(n).includes('Lịch đặt /'))[0]
     assert.equal(back.props.href,!example.expected&&example.roles.includes('STAFF')?'/staff/bookings':'/customer/bookings')
   }

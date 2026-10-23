@@ -1,19 +1,12 @@
 'use client'
+import Image from 'next/image'
+import { useQrImageDecoder } from './use-qr-image-decoder'
 
-import React, { useState, useRef, useEffect, useCallback } from 'react'
-import {
-  QrCode,
-  UploadCloud,
-  Camera,
-  Image as ImageIcon,
-  CheckCircle2,
-  AlertCircle,
-  Loader2,
-  X,
-} from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { decodeQrFromImageFile, extractInviteCode } from './qr-decoder'
-import { CameraQrScannerModal } from './camera-qr-scanner-modal'
+import { AlertCircle, Camera, CheckCircle2, Loader2, QrCode, UploadCloud, X } from 'lucide-react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { CameraQrScannerModal } from './lazy-camera-qr-scanner'
+import { extractInviteCode } from './qr-parser'
 
 interface QrFileUploadProps {
   onCodeDetected: (code: string) => void
@@ -21,6 +14,14 @@ interface QrFileUploadProps {
 }
 
 export function QrFileUpload({ onCodeDetected, busy = false }: QrFileUploadProps) {
+  const { decode, cancelDecode } = useQrImageDecoder()
+  const preview = useRef<string | null>(null)
+  useEffect(
+    () => () => {
+      if (preview.current) URL.revokeObjectURL(preview.current)
+    },
+    [],
+  )
   const [isDragging, setIsDragging] = useState(false)
   const [isScanning, setIsScanning] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -33,7 +34,7 @@ export function QrFileUpload({ onCodeDetected, busy = false }: QrFileUploadProps
   const processFile = useCallback(
     async (file: File) => {
       if (!file.type.startsWith('image/') && !file.name.endsWith('.svg')) {
-        setScanError('Vui lòng chọn file hình ảnh (PNG, JPG, WEBP, SVG).')
+        setScanError('Vui lòng chọn tệp hình ảnh (PNG, JPG, WEBP, SVG).')
         return
       }
 
@@ -42,11 +43,14 @@ export function QrFileUpload({ onCodeDetected, busy = false }: QrFileUploadProps
       setIsScanning(true)
 
       // Create local preview
+      if (preview.current) URL.revokeObjectURL(preview.current)
       const objectUrl = URL.createObjectURL(file)
+      preview.current = objectUrl
       setPreviewUrl(objectUrl)
 
+      const operation = decode(file)
       try {
-        const rawResult = await decodeQrFromImageFile(file)
+        const rawResult = await operation.promise
         const code = extractInviteCode(rawResult)
 
         if (!code) {
@@ -56,16 +60,16 @@ export function QrFileUpload({ onCodeDetected, busy = false }: QrFileUploadProps
         setScanSuccessMsg('Đã nhận diện mã QR thành công!')
         onCodeDetected(code)
       } catch (err: unknown) {
+        if (!operation.active()) return
         const error = err as { message?: string }
         setScanError(
-          error.message ||
-            'Không tìm thấy mã QR trong ảnh. Vui lòng thử ảnh khác rõ nét hơn.'
+          error.message || 'Không tìm thấy mã QR trong ảnh. Vui lòng thử ảnh khác rõ nét hơn.',
         )
       } finally {
-        setIsScanning(false)
+        if (operation.active()) setIsScanning(false)
       }
     },
-    [onCodeDetected]
+    [onCodeDetected, decode],
   )
 
   // Support pasting image from clipboard (Ctrl + V)
@@ -134,6 +138,9 @@ export function QrFileUpload({ onCodeDetected, busy = false }: QrFileUploadProps
   }
 
   function clearSelection() {
+    cancelDecode()
+    setIsScanning(false)
+    preview.current = null
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl)
     }
@@ -168,9 +175,7 @@ export function QrFileUpload({ onCodeDetected, busy = false }: QrFileUploadProps
             <QrCode className="h-4 w-4" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-slate-900">
-              Quét mã QR mời tham gia
-            </h3>
+            <h3 className="text-sm font-bold text-slate-900">Quét mã QR mời tham gia</h3>
             <p className="text-xs text-slate-500">
               Tải ảnh QR từ máy, chụp màn hình hoặc dùng camera
             </p>
@@ -216,22 +221,20 @@ export function QrFileUpload({ onCodeDetected, busy = false }: QrFileUploadProps
             <p className="text-xs font-semibold">Đang đọc và phân tích mã QR từ ảnh…</p>
           </div>
         ) : previewUrl ? (
-          <div
-            className="flex items-center gap-3 py-1"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="flex items-center gap-3 py-1" onClick={(e) => e.stopPropagation()}>
             {/* Thumbnail */}
             <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white p-1 shadow-xs">
-              <img
+              <Image
+                unoptimized
+                width={64}
+                height={64}
                 src={previewUrl}
                 alt="Ảnh QR đã chọn"
                 className="h-full w-full object-contain"
               />
             </div>
             <div className="text-left">
-              <p className="text-xs font-medium text-slate-700">
-                Ảnh đã chọn
-              </p>
+              <p className="text-xs font-medium text-slate-700">Ảnh đã chọn</p>
               <div className="mt-1 flex items-center gap-2">
                 <button
                   type="button"
@@ -257,10 +260,15 @@ export function QrFileUpload({ onCodeDetected, busy = false }: QrFileUploadProps
               <UploadCloud className="h-5 w-5 text-emerald-600" />
             </div>
             <p className="text-xs font-semibold text-slate-800">
-              <span className="text-emerald-700 underline">Bấm để tải ảnh QR</span> hoặc kéo thả vào đây
+              <span className="text-emerald-700 underline">Bấm để tải ảnh QR</span> hoặc kéo thả vào
+              đây
             </p>
             <p className="text-[11px] text-slate-500">
-              Hỗ trợ PNG, JPG, WEBP, SVG hoặc dán ảnh trực tiếp (<kbd className="rounded border bg-white px-1 py-0.5 text-[10px] font-mono text-slate-600">Ctrl + V</kbd>)
+              Hỗ trợ PNG, JPG, WEBP, SVG hoặc dán ảnh trực tiếp (
+              <kbd className="rounded border bg-white px-1 py-0.5 text-[10px] font-mono text-slate-600">
+                Ctrl + V
+              </kbd>
+              )
             </p>
           </div>
         )}

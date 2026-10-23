@@ -1,13 +1,13 @@
 'use client'
 
-import { useRef, useState } from 'react'
-import { useAuth } from '@/lib/auth-context'
 import { Button } from '@/components/ui/button'
-import { money } from '@/features/schedule/types'
-import type { Booking } from '@/features/booking/types'
-import { Banknote, X } from 'lucide-react'
-import { CounterPaymentSession } from './counter-payment'
 import { RefundPolicyNotice } from '@/features/booking/refund-policy-notice'
+import type { Booking } from '@/features/booking/types'
+import { money } from '@/features/schedule/types'
+import { useAuth } from '@/lib/auth-context'
+import { Banknote,X } from 'lucide-react'
+import { useRef,useState } from 'react'
+import { CounterPaymentSession } from './counter-payment'
 
 interface CounterPaymentModalProps {
   booking: Booking | null
@@ -40,13 +40,13 @@ function PaymentForm({ booking, payerId, session, onClose, onSuccess }: CounterP
     try {
       const confirmed = await session.confirm(booking, payerId)
       if (confirmed) {
-        onSuccess(`Thanh toán DEMO ${money(booking.amount, booking.currency)} đã thành công. Booking #${booking.id.slice(0, 8).toUpperCase()} đã được xác nhận.`)
+        onSuccess(`Thanh toán mô phỏng ${money(booking.amount, booking.currency)} đã thành công. lượt đặt #${booking.id.slice(0, 8).toUpperCase()} đã được xác nhận.`)
         onClose()
       } else {
-        setMessage('Thanh toán DEMO đã thành công, booking đang chờ hệ thống xác nhận. Bạn có thể kiểm tra lại mà không tạo giao dịch mới.')
+        setMessage('Thanh toán mô phỏng đã thành công, lượt đặt đang chờ hệ thống xác nhận. Bạn có thể kiểm tra lại mà không tạo giao dịch mới.')
       }
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Không thể thực hiện thanh toán DEMO.')
+      setError(error instanceof Error ? error.message : 'Không thể thực hiện thanh toán mô phỏng.')
     } finally {
       pending.current = false
       setBusy(false)
@@ -58,10 +58,10 @@ function PaymentForm({ booking, payerId, session, onClose, onSuccess }: CounterP
       <button onClick={onClose} disabled={busy} aria-label="Đóng" className="absolute right-4 top-4 text-slate-400"><X className="size-5"/></button>
       <div className="flex items-center gap-3 border-b pb-3">
         <Banknote className="size-7 text-emerald-600"/>
-        <div><h2 id="counter-payment-title" className="text-lg font-bold">Thanh toán DEMO tại quầy</h2><p className="text-xs text-slate-500">Mô phỏng thanh toán, không phát sinh giao dịch tiền thật.</p></div>
+        <div><h2 id="counter-payment-title" className="text-lg font-bold">Thanh toán mô phỏng tại quầy</h2><p className="text-xs text-slate-500">Mô phỏng thanh toán, không phát sinh giao dịch tiền thật.</p></div>
       </div>
       <div className="my-4 space-y-2 rounded-xl bg-slate-50 p-4 text-sm dark:bg-slate-800">
-        <p>Booking: <strong>#{booking.id.slice(0, 8).toUpperCase()}</strong></p>
+        <p>Lượt đặt: <strong>#{booking.id.slice(0, 8).toUpperCase()}</strong></p>
         <p>{booking.guestName || 'Khách có tài khoản'} {booking.guestPhone || ''}</p>
         <p>{new Date(booking.startsAt).toLocaleString('vi-VN', { timeZone: booking.priceSnapshot.timezone })}</p>
         <p>Số tiền mô phỏng: <strong>{money(booking.amount, booking.currency)}</strong></p>
@@ -71,7 +71,7 @@ function PaymentForm({ booking, payerId, session, onClose, onSuccess }: CounterP
       {message && <p role="status" className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{message}</p>}
       <form onSubmit={confirm} className="flex justify-end gap-3">
         <Button type="button" variant="outline" onClick={onClose} disabled={busy}>Đóng</Button>
-        <Button type="submit" disabled={busy} className="bg-emerald-600 text-white">{busy ? 'Đang kiểm tra…' : message ? 'Kiểm tra xác nhận booking' : 'Mô phỏng thanh toán thành công'}</Button>
+        <Button type="submit" disabled={busy} className="bg-emerald-600 text-white">{busy ? 'Đang kiểm tra…' : message ? 'Kiểm tra xác nhận lượt đặt' : 'Mô phỏng thanh toán thành công'}</Button>
       </form>
     </div>
   </div>

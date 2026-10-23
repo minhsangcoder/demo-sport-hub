@@ -1,11 +1,12 @@
 'use client'
 
+import { displayLabel } from '@/lib/display-labels'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { formatVnd } from '@/lib/mock-data'
 
-export function OwnerScheduleGrid({ slots = [] }: { slots?: readonly { label: string; type: string; price: number }[] }) { return <Card><CardHeader><CardTitle>Lịch vận hành sân</CardTitle></CardHeader><CardContent><div className="grid grid-cols-4 gap-2">{slots.slice(0, 12).map((slot) => <div key={slot.label} className="rounded border p-2 text-center text-xs"><strong>{slot.label}</strong><span className="mt-1 block text-slate-500">{slot.type}</span></div>)}</div></CardContent></Card> }
+export function OwnerScheduleGrid({ slots = [] }: { slots?: readonly { label: string; type: string; price: number }[] }) { return <Card><CardHeader><CardTitle>Lịch vận hành sân</CardTitle></CardHeader><CardContent><div className="grid grid-cols-4 gap-2">{slots.slice(0, 12).map((slot) => <div key={slot.label} className="rounded border p-2 text-center text-xs"><strong>{slot.label}</strong><span className="mt-1 block text-slate-500">{displayLabel(slot.type)}</span></div>)}</div></CardContent></Card> }
 
 export function StaffManagement({ onAdd }: { onAdd?: () => void }) { return <Card><CardHeader><div className="flex items-center justify-between"><CardTitle>Quản lý nhân viên</CardTitle><Button onClick={onAdd}>+ Thêm nhân viên</Button></div></CardHeader><CardContent><Input placeholder="Tìm theo tên hoặc số điện thoại" /></CardContent></Card> }
 

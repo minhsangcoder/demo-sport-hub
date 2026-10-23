@@ -2,6 +2,7 @@
 
 import { MapPin, Users } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { displayLabel } from '@/lib/display-labels'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -12,7 +13,7 @@ export function CourtCard({ name, address, sport, onSelect }: { name: string; ad
 }
 
 export function TimeSlotMatrix({ slots }: { slots: readonly { label: string; type: string; price: number }[] }) {
-  return <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{slots.map((slot) => <button key={slot.label} className="rounded-lg border border-slate-200 px-3 py-2 text-left text-sm hover:border-emerald-400"><span className="font-semibold">{slot.label}</span><span className="mt-1 block text-xs text-slate-500">{slot.price ? formatVnd(slot.price) : slot.type}</span></button>)}</div>
+  return <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{slots.map((slot) => <button key={slot.label} className="rounded-lg border border-slate-200 px-3 py-2 text-left text-sm hover:border-emerald-400"><span className="font-semibold">{slot.label}</span><span className="mt-1 block text-xs text-slate-500">{slot.price ? formatVnd(slot.price) : displayLabel(slot.type)}</span></button>)}</div>
 }
 
 export function FilterBar() {

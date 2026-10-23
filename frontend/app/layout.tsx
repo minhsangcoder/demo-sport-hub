@@ -6,7 +6,7 @@ import { AppHeader } from '@/components/layout/app-header'
 
 export const metadata: Metadata = {
   title: 'SportHub — Đặt sân thể thao tại Hà Nội',
-  description: 'Tìm và đặt sân pickleball, cầu lông, tennis và bóng đá tại Hà Nội.',
+  description: 'Tìm và đặt sân pickleball, cầu lông, quần vợt và bóng đá tại Hà Nội.',
   generator: 'v0.app',
   icons: {
     icon: [

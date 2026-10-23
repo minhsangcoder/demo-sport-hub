@@ -15,6 +15,12 @@ function load(file, extra = {}) {
     console,
     require(id) {
       if (id === "./error-translator") return load("lib/error-translator.ts");
+      if (id === "./display-labels") return load("lib/display-labels.ts");
+      if (id === "./read-state") return load("lib/read-state.ts");
+      if (id.startsWith(".")) {
+        const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(file), id)) + '.ts';
+        return load(resolved);
+      }
       throw new Error(`Unexpected require: ${id}`);
     },
     URL,

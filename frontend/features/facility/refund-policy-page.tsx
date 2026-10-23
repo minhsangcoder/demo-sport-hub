@@ -1,12 +1,12 @@
 'use client'
 
-import { useState } from 'react'
-import { api, ApiError } from '@/lib/api'
-import { useApi } from '@/lib/use-api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useFacility } from './facility-context'
-import { refundBpsToPercent, refundPercentToBps, type RefundPolicy } from './refund-policy'
+import { ApiError,api } from '@/lib/api'
+import { useApi } from '@/lib/use-api'
+import { useState } from 'react'
+import { useFacility } from "./facility-store"
+import { refundBpsToPercent,refundPercentToBps,type RefundPolicy } from './refund-policy'
 
 export function RefundPolicyPage() {
   const { facility } = useFacility()
@@ -49,23 +49,23 @@ function RefundPolicyEditor({ facilityId }: { facilityId: string }) {
   const policy = resource.data
   return <section className="max-w-2xl space-y-5">
     <h2 className="text-2xl font-bold">Chính sách hoàn tiền</h2>
-    <p className="text-slate-600">Chọn tỷ lệ hoàn khi booking được hủy hợp lệ trước giờ chơi tại cơ sở này. Booking đã chốt chính sách giữ tỷ lệ khách đã chấp nhận; thay đổi áp dụng cho booking mới.</p>
-    {!policy.configured && <p className="rounded-xl bg-amber-50 p-4 text-amber-900">Cơ sở chưa cấu hình tỷ lệ hoàn nên chưa nhận booking mới. Hãy lưu chính sách để mở đặt sân; có thể chọn rõ 0% nếu không hoàn khi hủy.</p>}
+    <p className="text-slate-600">Cấu hình tỷ lệ hoàn tiền khi lượt đặt được hủy hợp lệ trước giờ chơi. <strong>Lưu ý:</strong> Chính sách hoàn tiền này chỉ áp dụng để hoàn tiền cho người mua lại lượt đặt qua chuyển nhượng (dựa trên giá mua lại × tỷ lệ hoàn của cơ sở). Lượt đặt trực tiếp ban đầu khi khách tự hủy sẽ không được hoàn tiền.</p>
+    {!policy.configured && <p className="rounded-xl bg-amber-50 p-4 text-amber-900">Cơ sở chưa cấu hình tỷ lệ hoàn nên chưa nhận lượt đặt mới. Hãy lưu chính sách để mở đặt sân; có thể chọn rõ 0% nếu cơ sở không hoàn khi hủy.</p>}
     {policy.configured && <p className="text-sm text-slate-600">Tỷ lệ hiện tại: <strong>{refundBpsToPercent(policy.rateBps)}%</strong> · Phiên bản {policy.version}</p>}
     <form key={`${policy.version}:${policy.rateBps}`} onSubmit={submit} className="space-y-4 rounded-2xl border p-5">
       <label className="grid gap-2 text-sm font-medium">Tỷ lệ hoàn (%)
         <Input name="percent" inputMode="decimal" required autoComplete="off" placeholder="Ví dụ: 80"
           defaultValue={refundBpsToPercent(policy.rateBps)} disabled={busy} aria-describedby="refund-rate-help" />
       </label>
-      <p id="refund-rate-help" className="text-sm text-slate-500">Từ 0 đến 100%, tối đa 2 chữ số thập phân. Chỉ Owner được thay đổi tỷ lệ.</p>
+      <p id="refund-rate-help" className="text-sm text-slate-500">Từ 0 đến 100%, tối đa 2 chữ số thập phân. Chỉ chủ cơ sở được thay đổi tỷ lệ.</p>
       {error && <p role="alert" className="text-red-700">{error}</p>}
       {conflict && <Button type="button" onClick={() => { setError(''); setConflict(false); resource.reload() }}>Tải chính sách mới</Button>}
-      {saved && <p role="status" className="text-emerald-700">Đã lưu chính sách hoàn tiền cho booking mới.</p>}
+      {saved && <p role="status" className="text-emerald-700">Đã lưu chính sách hoàn tiền cho lượt đặt mới.</p>}
       <Button type="submit" disabled={busy || conflict} className="bg-emerald-600 text-white">{busy ? 'Đang lưu…' : 'Lưu chính sách hoàn tiền'}</Button>
     </form>
     <div className="space-y-2 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
-      <p>Owner hoặc nhân viên được cấp quyền hoàn tiền tại cơ sở thực hiện khoản hoàn. Nhân viên không được sửa tỷ lệ hoặc chọn người nhận khác.</p>
-      <p>Với booking đã chuyển nhượng, tỷ lệ tính trên giá người giữ hiện tại đã mua lại và hoàn cho người đó. Tiền gốc và khoản trả người bán được đối soát riêng.</p>
+      <p>Chủ cơ sở hoặc nhân viên được cấp quyền hoàn tiền tại cơ sở thực hiện khoản hoàn. Nhân viên không được sửa tỷ lệ hoặc chọn người nhận khác.</p>
+      <p>Với lượt đặt đã chuyển nhượng, tỷ lệ tính trên giá người giữ hiện tại đã mua lại và hoàn cho người đó. Tiền gốc và khoản trả người bán được đối soát riêng.</p>
       <p>Lỗi thanh toán hoặc bàn giao chuyển nhượng không thành công được hoàn đủ 100% khoản đã thu; không áp tỷ lệ hủy này.</p>
     </div>
   </section>

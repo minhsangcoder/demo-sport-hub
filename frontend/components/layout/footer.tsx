@@ -43,7 +43,7 @@ export function Footer() {
               <span>SportHub<span className="text-amber-400">.</span></span>
             </Link>
             <p className="mt-4 max-w-sm text-sm leading-relaxed text-slate-400">
-              Hệ thống kết nối người chơi và cơ sở thể thao thông minh. Đặt sân theo thời gian thực, quản lý hội nhóm, check-in mã QR bảo mật và tối ưu doanh thu sân đấu.
+              Hệ thống kết nối người chơi và cơ sở thể thao thông minh. Đặt sân theo thời gian thực, quản lý hội nhóm, xác nhận vào sân mã QR bảo mật và tối ưu doanh thu sân đấu.
             </p>
             <div className="mt-6 flex items-center gap-4 text-xs text-slate-400">
               <div className="flex items-center gap-1.5">
@@ -78,7 +78,7 @@ export function Footer() {
               </li>
               <li>
                 <Link href="/search?sportCategoryId=tennis" className="transition-colors hover:text-emerald-400">
-                  Sân Tennis cao cấp
+                  Sân quần vợt cao cấp
                 </Link>
               </li>
               <li>

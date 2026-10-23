@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {createRequire} from 'node:module'
 import {execFileSync} from 'node:child_process'
+import {browserBookingFlows} from './demo-finance-browser-flows.mjs'
 const config=JSON.parse(fs.readFileSync(process.argv[2],'utf8'))
 assert.match(config.pg,/^sporthub-finance-test-pg-[a-f0-9]+$/)
 assert.ok(Object.values(config.databases).every(n=>/^\w+_system_phase12_[a-f0-9]+$/.test(n)))
@@ -42,7 +43,7 @@ async function transfer(bookingId,{pay=true,viaBrowser=false}={}){
  const acquisition=await call('b','POST',`/transfers/${listing.id}/acquisitions`,{acceptedTermsHash:quote.termsHash},201,{'Idempotency-Key':key()})
  const p=await payment('b',bookingId,{acquisitionId:acquisition.id})
  if(pay){
-  if(viaBrowser){const page=await loginPage('b');await page.goto(config.baseURL+`/customer/payments/${p.id}`);await page.getByRole('heading',{name:'Điều khoản chuyển nhượng DEMO'}).waitFor();await page.getByRole('button',{name:'Thanh toán DEMO',exact:true}).click();await page.waitForURL(`**/customer/transfers/acquisitions/${acquisition.id}`);await page.getByRole('link',{name:'Mở booking và mã check-in của bạn'}).waitFor();await page.screenshot({path:path.join(output,'buyer-rights.png'),fullPage:true})}
+  if(viaBrowser){const page=await loginPage('b');await page.goto(config.baseURL+`/customer/payments/${p.id}`);await page.getByRole('heading',{name:'Điều khoản chuyển nhượng mô phỏng'}).waitFor();await page.getByRole('button',{name:'Thanh toán mô phỏng',exact:true}).click();await page.waitForURL(`**/customer/transfers/acquisitions/${acquisition.id}`);await page.getByRole('link',{name:'Mở lượt đặt và mã xác nhận vào sân của bạn'}).waitFor();await page.screenshot({path:path.join(output,'buyer-rights.png'),fullPage:true})}
   else await call('b','POST',`/payments/${p.id}/demo/complete`,{outcome:'SUCCESS'})
   await poll(()=>call('b','GET',`/transfers/acquisitions/${acquisition.id}`),d=>d.state==='SUCCESS')
  }
@@ -54,12 +55,12 @@ try{
  sql('identity',`INSERT INTO user_roles(user_id,role) VALUES('${actors.admin.id}','ADMIN'),('${actors.owner.id}','OWNER')`);await login('admin');await login('owner')
  const category=await call('admin','POST','/admin/sport-categories',{name:'Finance DEMO '+config.run,active:true},201)
  const facility=await call('owner','POST','/owner/facilities',{name:'Finance DEMO '+config.run,phone:'+84901234567',addressLine:'Synthetic address',provinceCode:'01',province:'Hà Nội',wardCode:'00004',ward:'Ba Đình',timezone:'Asia/Ho_Chi_Minh',amenities:[]},201);fid=facility.id
- for(const name of ['example','rights','guest','counter','group','technical','cancelGuest','partial'])courts[name]=await call('owner','POST',`/owner/facilities/${fid}/courts`,{code:name,name:'Sân DEMO '+name,sportCategoryId:category.id,enabled:true},201)
+ for(const name of ['example','rights','guest','counter','group','technical','cancelGuest','partial','uiOnline','uiGuest','uiLinked','uiGroup'])courts[name]=await call('owner','POST',`/owner/facilities/${fid}/courts`,{code:name,name:'Sân DEMO '+name,sportCategoryId:category.id,enabled:true},201)
  await call('owner','PUT',`/schedules/facilities/${fid}/hours`,{intervals:Array.from({length:7},(_,i)=>({dayOfWeek:i+1,opensAt:'00:00',closesAt:'23:55',slotMinutes:5}))})
  const today=new Date(Date.now()+7*3600000).toISOString().slice(0,10)
  for(let i=1;i<=7;i++)await call('owner','POST',`/schedules/facilities/${fid}/pricing`,{dayOfWeek:i,startsAt:'00:00',endsAt:'23:55',pricePerSlot:120000,priority:0,label:'DEMO court receipt',effectiveFrom:today,currency:'VND'},201)
  sql('facility',`UPDATE facilities SET status='ACTIVE',version=version+1 WHERE id='${fid}'`)
- const start=Math.ceil((Date.now()+10*60000)/300000)*300000;slot={startsAt:new Date(start).toISOString(),endsAt:new Date(start+300000).toISOString()}
+ const start=Math.ceil((Date.now()+20*60000)/300000)*300000;slot={startsAt:new Date(start).toISOString(),endsAt:new Date(start+300000).toISOString()}
  await call('a','POST','/bookings/holds',{courtId:courts.example.id,...slot,expectedAmount:120000},409,{'Idempotency-Key':key()})
  const refundPolicy=await call('owner','PUT',`/owner/facilities/${fid}/refund-policy`,{rateBps:8000,version:0})
  await call('owner','PUT',`/owner/facilities/${fid}/transfer-policy`,{enabled:true,minLeadSeconds:0})
@@ -74,8 +75,8 @@ try{
  browser=await chromium.launch({channel:process.env.SPORTHUB_E2E_BROWSER||'chrome',headless:true})
  const deal=await transfer(b.id,{viaBrowser:true});const buyer=await confirmed('b',b.id);assert.equal(buyer.booking.currentHolderId,actors.b.id)
  const panel=await call('owner','GET',`/bookings/demo-finance/facility/${fid}`);assert.equal(panel.settlements[0].payoutState,'UNPAID')
- const ownerPage=await loginPage('owner');await ownerPage.goto(config.baseURL+`/owner/bookings?facilityId=${fid}`);await ownerPage.getByRole('button',{name:'Trả tiền DEMO cho A',exact:true}).click();await ownerPage.getByText('Đã trả DEMO',{exact:true}).waitFor()
- const cancelled=await cancel('b',b.id);assert.equal(cancelled.refund.targetAmount,'80000');await ownerPage.getByRole('button',{name:'Tải lại nghĩa vụ',exact:true}).click();await ownerPage.getByRole('button',{name:'Hoàn tiền DEMO',exact:true}).click();await ownerPage.getByText('Đã hoàn DEMO',{exact:true}).waitFor()
+ const ownerPage=await loginPage('owner');await ownerPage.goto(config.baseURL+`/owner/bookings?facilityId=${fid}`);await ownerPage.getByRole('button',{name:'Trả tiền mô phỏng cho A',exact:true}).click();await ownerPage.getByText('Đã trả mô phỏng',{exact:true}).waitFor()
+ const cancelled=await cancel('b',b.id);assert.equal(cancelled.refund.targetAmount,'80000');await ownerPage.getByRole('button',{name:'Tải lại nghĩa vụ',exact:true}).click();await ownerPage.getByRole('button',{name:'Hoàn tiền mô phỏng',exact:true}).click();await ownerPage.getByText('Đã hoàn mô phỏng',{exact:true}).waitFor()
  const range=`fromDate=${today}&toDate=${today}`,report=await call('owner','GET',`/bookings/reports/facility/${fid}/dashboard?${range}`)
  assert.equal(report.moneyAvailability,'COMPLETE');assert.deepEqual([report.summary.money.courtCollected,report.summary.money.transferCollected,report.summary.money.transferFees,report.summary.money.sellerPaid,report.summary.money.policyRefunded,report.summary.money.operatingRevenue,report.summary.money.afterRefund],['120000','100000','5000','95000','80000','125000','45000'])
  await ownerPage.goto(config.baseURL+`/owner/facilities/${fid}/reports`);await ownerPage.getByText('125.000 ₫',{exact:true}).waitFor();await ownerPage.screenshot({path:path.join(output,'actual-report-125000-45000.png'),fullPage:true})
@@ -103,6 +104,7 @@ try{
  for(const name of ['a','c']){const member=group.members.find(m=>m.userId===actors[name].id);await collect(name,group.id,{memberId:member.id})}
  const groupBooking=await confirmed('a',group.id);assert.equal((await call('staff','POST',`/bookings/${group.id}/check-in`,{token:groupBooking.checkinToken})).status,'CHECKED_IN')
  pass('Group actual contributions sum to full court price before signed QR check-in')
+ await browserBookingFlows({actors,fid,courts,slot,call,loginPage,confirmed,pass,baseURL:config.baseURL,linkedPhone,password,output})
  const technical=await book('a','technical');await collect('a',technical.id);await confirmed('a',technical.id);const failedDeal=await transfer(technical.id,{pay:false})
  const rabbit=config.containers.find(n=>n.startsWith('sporthub-phase12-rabbit-'));assert.ok(rabbit)
  execFileSync('docker',['pause',rabbit],{windowsHide:true})
@@ -125,4 +127,5 @@ try{
  pass('Live grant revocation and Admin read-only scope; final DEMO report has technical refunds separate; zero bank-beneficiary or legacy settlement setup')
  assert.deepEqual(errors,[])
  fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({checks,fixture:{facilityId:fid,bookingId:b.id,deal,rightsBookingId:rights.id,technicalBookingId:technical.id},initialReport:report,finalReport:final,browserErrors:errors},null,2))
+}catch(error){let n=0;for(const context of contexts)for(const page of context.pages()){fs.writeFileSync(path.join(output,`failure-${n}.txt`),await page.locator('body').innerText().catch(()=>''));await page.screenshot({path:path.join(output,`failure-${n++}.png`),fullPage:true}).catch(()=>{})}throw error
 }finally{for(const context of contexts)await context.close();if(browser)await browser.close();for(const actor of Object.values(actors))await actor.http.dispose();await guest.dispose()}

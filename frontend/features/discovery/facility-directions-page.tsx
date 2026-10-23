@@ -123,7 +123,7 @@ export function FacilityDirectionsPage({
                   Lượt đặt của bạn đã thanh toán thành công
                 </p>
                 <p className="text-xs text-emerald-800">
-                  Mã booking: <strong className="font-mono">{effectiveBookingId.slice(0, 8).toUpperCase()}</strong> · Trạng thái: Đã xác nhận
+                  Mã lượt đặt: <strong className="font-mono">{effectiveBookingId.slice(0, 8).toUpperCase()}</strong> · Trạng thái: Đã xác nhận
                 </p>
               </div>
             </div>
@@ -132,7 +132,7 @@ export function FacilityDirectionsPage({
               className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-4 py-2 text-xs sm:text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition"
             >
               <Ticket className="h-4 w-4" />
-              <span>Xem vé xác nhận & QR check-in</span>
+              <span>Xem vé xác nhận & QR xác nhận vào sân</span>
             </Link>
           </div>
         )}

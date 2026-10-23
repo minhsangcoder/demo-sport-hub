@@ -12,6 +12,10 @@ class OwnerApplicationMigrationTest {
   PostgreSQLContainer<?> temporary=null;String url=System.getenv("SPORTHUB_SCHEDULE_TEST_DB_URL"),user=System.getenv("SPORTHUB_TEST_DB_USER"),password=System.getenv("SPORTHUB_TEST_DB_PASSWORD");
   if(url==null){temporary=new PostgreSQLContainer<>("postgres:16-alpine");temporary.start();url=temporary.getJdbcUrl();user=temporary.getUsername();password=temporary.getPassword();}
   try {
+   // Shared extensions belong to public; otherwise the second isolated schema cannot resolve V1 UUID defaults.
+   try(var connection=DriverManager.getConnection(url,user,password);var statement=connection.createStatement()){
+    statement.execute("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\" WITH SCHEMA public");
+   }
    for(boolean upgrade:new boolean[]{false,true}){
     String schema="owner_migration_"+UUID.randomUUID().toString().replace("-","");
     if(upgrade){var before=Flyway.configure().dataSource(url,user,password).schemas(schema).defaultSchema(schema).target("2").load();before.migrate();assertThat(before.info().current().getVersion().toString()).isEqualTo("2");}

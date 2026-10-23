@@ -24,7 +24,7 @@ function Notice($recipient,$groupId){
 }
 $sessions=@();$group=$null
 try{
- foreach($identifier in @('customer','customer2','owner','staff')){$sessions+=Request POST '/auth/login' @{identifier="$identifier@sporthub.local";password=$values.DEMO_PASSWORD}}
+ foreach($identifier in @('customer','customer2','owner','admin')){$sessions+=Request POST '/auth/login' @{identifier="$identifier@sporthub.local";password=$values.DEMO_PASSWORD}}
  $customer,$a,$b,$c=$sessions
  $facility=Get-DemoFacility $ApiBase;$court=@(Request GET "/facilities/$($facility.id)/courts"|Where-Object name -eq 'Sân Pickleball 1')[0]
  $date=(Get-Date).AddDays(7).ToString('yyyy-MM-dd');$slot=@((Request GET "/bookings/availability?courtId=$($court.id)&date=$date").slots|Where-Object state -eq 'AVAILABLE')[0];if(!$slot){throw 'No available reminder fixture slot'}

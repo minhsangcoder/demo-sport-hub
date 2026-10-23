@@ -11,9 +11,9 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 os.environ['SPORTHUB_E2E_TEST_SCRIPT'] = 'demo-finance-e2e.mjs'
-os.environ['SPORTHUB_E2E_ARTIFACT_ROOT'] = str(ROOT / 'tmp/backend-demo-system')
-os.environ['SPORTHUB_E2E_FRONTEND_ROOT'] = str(ROOT / 'tmp/demo-system-ui')
-os.environ['SPORTHUB_E2E_OUTPUT'] = str(ROOT / 'tmp/demo-system-evidence')
+os.environ.setdefault('SPORTHUB_E2E_ARTIFACT_ROOT', str(ROOT / 'tmp/backend-demo-system'))
+os.environ.setdefault('SPORTHUB_E2E_FRONTEND_ROOT', str(ROOT / 'tmp/demo-system-ui'))
+os.environ.setdefault('SPORTHUB_E2E_OUTPUT', str(ROOT / 'tmp/demo-system-evidence'))
 spec = importlib.util.spec_from_file_location('system_e2e_harness', ROOT / 'scripts/system-e2e.py')
 harness = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(harness)

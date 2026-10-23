@@ -11,7 +11,10 @@ $other=Request POST '/auth/login' @{identifier='customer2@sporthub.local';passwo
 $owner=Request POST '/auth/login' @{identifier='owner@sporthub.local';password=$demoPassword}
 $staff=Request POST '/auth/login' @{identifier='staff@sporthub.local';password=$demoPassword}
 try {
- $facility=Get-DemoFacility $ApiBase;$court=@(Request GET "/facilities/$($facility.id)/courts" | Where-Object name -eq 'Sân Pickleball 1')[0]
+ $facility=Get-DemoFacility $ApiBase
+ $policy=Request GET "/owner/facilities/$($facility.id)/refund-policy" $null $owner.accessToken
+ if(!$policy.configured){Request PUT "/owner/facilities/$($facility.id)/refund-policy" @{rateBps=8000;version=0} $owner.accessToken|Out-Null}
+ $court=@(Request GET "/facilities/$($facility.id)/courts" | Where-Object name -eq 'Sân Pickleball 1')[0]
  $date=(Get-Date).AddDays(3).ToString('yyyy-MM-dd');$preview=Request GET "/bookings/availability?courtId=$($court.id)&date=$date"
  $slot=@($preview.slots|Where-Object state -eq 'AVAILABLE')[0];if(!$slot){throw 'No available demo slot'}
  $input=@{courtId=$court.id;startsAt=$slot.startsAt;endsAt=$slot.endsAt;expectedAmount=$slot.amount}

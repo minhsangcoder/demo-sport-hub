@@ -27,7 +27,14 @@ public class BookingPolicyCancellation {
         this.repo=repo;this.dependencies=dependencies;this.collections=collections;this.lifecycle=lifecycle;this.finance=finance;this.evidence=evidence;this.clock=clock;this.tx=new TransactionTemplate(manager);
     }
     public Map<String,Object> quote(UUID id,Caller actor,String token){
-        var before=repo.find(id);authority(before,actor,token);var basis=basis(before);requireDemo(basis,before);
+        var before=repo.find(id);authority(before,actor,token);
+        if(actor!=null&&actor.hasRole("CUSTOMER")&&!actor.hasRole("OWNER")&&!actor.hasRole("STAFF")){
+            int transfers=repo.jdbc().queryForObject("SELECT count(*) FROM transfer_handoffs WHERE booking_id=?",Integer.class,id);
+            if(transfers==0){
+                throw new ConflictException("Không áp dụng hoàn tiền cho người đặt ban đầu khi tự hủy. Chính sách hoàn tiền chỉ áp dụng cho người mua lại lượt đặt qua chuyển nhượng; bạn có thể đăng chuyển nhượng lượt đặt.");
+            }
+        }
+        var basis=basis(before);requireDemo(basis,before);
         return tx.execute(status->{repo.lock(before.courtId());var b=repo.find(id);eligible(b);var current=basis(b);
             if(!current.fingerprint().equals(basis.fingerprint()))throw new ConflictException("Payment or ownership changed; request a new quote");
             var p=policy(id);int rate=((Number)p.get("refund_rate_bps")).intValue();var allocations=DemoRefundMath.allocate(current.payments(),rate);
@@ -42,7 +49,14 @@ public class BookingPolicyCancellation {
     }
     public Map<String,Object> cancel(UUID id,Input input,String key,Caller actor,String token){
         if(input==null||input.quoteId()==null||input.reason()==null||input.reason().isBlank()||input.reason().length()>500||key==null||!key.matches("[A-Za-z0-9_.:-]{1,100}"))throw new IllegalArgumentException("Quote, reason and Idempotency-Key are required");
-        var before=repo.find(id);authority(before,actor,token);String fingerprint=Signatures.sha256(id+"|"+input.quoteId()+"|"+input.reason());
+        var before=repo.find(id);authority(before,actor,token);
+        if(actor!=null&&actor.hasRole("CUSTOMER")&&!actor.hasRole("OWNER")&&!actor.hasRole("STAFF")){
+            int transfers=repo.jdbc().queryForObject("SELECT count(*) FROM transfer_handoffs WHERE booking_id=?",Integer.class,id);
+            if(transfers==0){
+                throw new ConflictException("Không áp dụng hoàn tiền cho người đặt ban đầu khi tự hủy. Chính sách hoàn tiền chỉ áp dụng cho người mua lại lượt đặt qua chuyển nhượng; bạn có thể đăng chuyển nhượng lượt đặt.");
+            }
+        }
+        String fingerprint=Signatures.sha256(id+"|"+input.quoteId()+"|"+input.reason());
         return tx.execute(status->{repo.lock(actor.id());repo.lock(before.courtId());var b=repo.find(id);
             var old=repo.jdbc().queryForList("SELECT fingerprint,resource_id FROM request_idempotency WHERE actor_id=? AND operation='CANCEL_WITH_POLICY' AND key=?",actor.id(),key);
             if(!old.isEmpty()){if(!fingerprint.equals(old.getFirst().get("fingerprint")))throw new ConflictException("Cancellation key reused with another request");return result(b,(UUID)old.getFirst().get("resource_id"));}

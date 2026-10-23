@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { extractInviteCode, extractCheckinToken, extractBookingIdFromToken } from '../features/groups/qr-decoder.ts'
+import { extractInviteCode, extractCheckinToken, extractBookingIdFromToken } from '../features/groups/qr-parser.ts'
 
 test('extractInviteCode extracts code from various formats', () => {
   // 1. Full absolute URL

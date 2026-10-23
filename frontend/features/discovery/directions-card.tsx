@@ -215,7 +215,7 @@ export function DirectionsCard({
           rel="noopener noreferrer"
           className="absolute top-3 left-3 z-10 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white/95 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-md backdrop-blur-xs transition hover:bg-white hover:text-emerald-700"
         >
-          <span>Open in Maps</span>
+          <span>Mở bản đồ</span>
           <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
         </a>
 

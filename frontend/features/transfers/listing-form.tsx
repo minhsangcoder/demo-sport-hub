@@ -45,7 +45,7 @@ function Loaded({ bookingId, listingId }: { bookingId?: string; listingId?: stri
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Không thể lưu tin. Nếu phí đã đổi, hãy xem lại điều khoản.'); setTerms(null); setConsent(false) }
     finally { setBusy(false) }
   }
-  if (booking.loading || listing.loading) return <p role="status" className="p-8">Đang tải booking…</p>
+  if (booking.loading || listing.loading) return <p role="status" className="p-8">Đang tải lượt đặt…</p>
   if (!booking.data && !listing.data) return <p role="alert" className="p-8 text-red-700">{booking.error || listing.error}<button className="ml-4 underline" onClick={() => { booking.reload(); listing.reload() }}>Thử lại</button></p>
   const amount = booking.data?.booking.amount ?? listing.data!.originalAmount
   const starts = booking.data?.booking.startsAt ?? listing.data!.startsAt
@@ -57,7 +57,7 @@ function Loaded({ bookingId, listingId }: { bookingId?: string; listingId?: stri
     <form onSubmit={quote} onChange={() => { setTerms(null); setConsent(false) }} className="mt-8 space-y-5">
       <label className="grid gap-2 text-sm">Giá chuyển nhượng ({currency})<Input name="price" type="number" min={1} max={amount} step={1} required defaultValue={listing.data?.price ?? amount} disabled={busy} /></label>
       <label className="grid gap-2 text-sm">Hạn nhận lượt đặt<Input name="deadline" type="datetime-local" required max={localInput(starts)} defaultValue={localInput(listing.data?.deadline ?? starts)} disabled={busy} /></label>
-      <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">Cơ sở nhận thanh toán DEMO của người mua, giữ phí Owner cấu hình và trả bạn phần còn lại. Không cần nhập tài khoản ngân hàng để demo.</p>
+      <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">Cơ sở nhận thanh toán mô phỏng của người mua, giữ phí chủ cơ sở cấu hình và trả bạn phần còn lại. Không cần nhập tài khoản ngân hàng để mô phỏng.</p>
       <Button type="submit" variant="outline" disabled={busy}>{busy ? 'Đang xử lý…' : 'Xem phí và điều khoản'}</Button>
     </form>
     {terms && <><TransferFinanceNotice terms={terms} /><label className="flex items-start gap-3 text-sm"><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} disabled={busy} className="mt-1" />Tôi đồng ý phí cơ sở, số tiền nhận và chính sách hoàn đã hiển thị.</label><Button type="button" className="mt-5 h-12 w-full bg-emerald-600 text-white" onClick={publish} disabled={!consent || busy}>{busy ? 'Đang lưu…' : listingId ? 'Lưu thay đổi' : 'Đăng tin chuyển nhượng'}</Button></>}

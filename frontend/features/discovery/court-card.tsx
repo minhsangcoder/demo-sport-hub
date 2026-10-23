@@ -1,28 +1,19 @@
 'use client'
 
-import React, { useState } from 'react'
-import Link from 'next/link'
-import {
-  Star,
-  Heart,
-  Navigation,
-  MapPin,
-  Clock,
-} from 'lucide-react'
-import { useApi } from '@/lib/use-api'
-import { money } from '@/features/schedule/types'
+import { LocalCourtImage } from '@/components/local-court-image'
 import type { Media } from '@/features/facility/types'
+import { money } from '@/features/schedule/types'
+import { useApi } from '@/lib/use-api'
+import { Clock, Heart, MapPin, Navigation, Star } from 'lucide-react'
+import Link from 'next/link'
+import { useState } from 'react'
 import type { DiscoveryResult } from './types'
 
 function getSportFallbackImage(sportName: string): string {
   const lower = (sportName || '').toLowerCase()
   if (lower.includes('pickleball')) return '/images/hero-pickleball.png'
   if (lower.includes('tennis')) return '/images/hero-tennis.png'
-  if (
-    lower.includes('cầu lông') ||
-    lower.includes('badminton') ||
-    lower.includes('paddle')
-  ) {
+  if (lower.includes('cầu lông') || lower.includes('badminton') || lower.includes('paddle')) {
     return '/images/hero-paddle.png'
   }
   return '/images/court-aerial.jpg'
@@ -43,18 +34,18 @@ export function CourtCard({ result, time }: CourtCardProps) {
 
   // Find image assigned specifically to this court, or the facility's first image
   const uploadedImage =
-    imagesRes.data?.find((m) => m.courtId === result.courtId) ||
-    imagesRes.data?.[0]
+    imagesRes.data?.find((m) => m.courtId === result.courtId) || imagesRes.data?.[0]
 
   const fallbackImage = getSportFallbackImage(result.sportName)
-  const displayImageUrl =
-    !imgError && uploadedImage?.url ? uploadedImage.url : fallbackImage
+  const displayImageUrl = !imgError && uploadedImage?.url ? uploadedImage.url : fallbackImage
 
   return (
     <article className="group relative flex flex-col overflow-hidden rounded-2xl sm:rounded-3xl border border-slate-200/90 bg-white shadow-xs transition-all duration-300 hover:-translate-y-1 hover:border-emerald-300 hover:shadow-xl">
       {/* 1. Top Image Banner (Cover Photo from Owner / Fallback) */}
       <div className="relative h-44 sm:h-48 w-full overflow-hidden bg-slate-900">
-        <img
+        <LocalCourtImage
+          fill
+          sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
           src={displayImageUrl}
           alt={`${result.courtName} - ${f.name}`}
           onError={() => setImgError(true)}
@@ -105,9 +96,7 @@ export function CourtCard({ result, time }: CourtCardProps) {
           >
             <Heart
               className={`h-4 w-4 transition ${
-                isFavorite
-                  ? 'fill-rose-500 text-rose-500 scale-110'
-                  : 'text-slate-600'
+                isFavorite ? 'fill-rose-500 text-rose-500 scale-110' : 'text-slate-600'
               }`}
             />
           </button>
@@ -120,7 +109,9 @@ export function CourtCard({ result, time }: CourtCardProps) {
           {/* Header row with Circular Facility/Court Avatar (Photo 2 style) */}
           <div className="flex items-start gap-3">
             <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-emerald-500/20 bg-slate-900 text-white shadow-xs">
-              <img
+              <LocalCourtImage
+                width={48}
+                height={48}
                 src={displayImageUrl}
                 alt=""
                 className="h-full w-full object-cover"
@@ -185,16 +176,12 @@ export function CourtCard({ result, time }: CourtCardProps) {
         {/* 3. Card Footer: Pricing (/h) & Golden Amber CTA Button */}
         <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
           <div className="min-w-0">
-            <span className="text-[11px] font-medium text-slate-400 block">
-              Giá thuê sân
-            </span>
+            <span className="text-[11px] font-medium text-slate-400 block">Giá thuê sân</span>
             <div className="flex items-baseline gap-1 whitespace-nowrap">
               <span className="text-base sm:text-lg font-black text-emerald-800 tracking-tight">
                 Từ {money(result.fromPrice, result.currency)}
               </span>
-              <span className="text-xs font-semibold text-slate-500">
-                /h
-              </span>
+              <span className="text-xs font-semibold text-slate-500">/giờ</span>
             </div>
           </div>
 

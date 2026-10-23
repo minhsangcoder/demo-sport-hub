@@ -1,4 +1,4 @@
-import { importLibrary, setOptions } from '@googlemaps/js-api-loader'
+import { importLibrary,setOptions } from '@googlemaps/js-api-loader'
 import { placeAdministrativeCodes } from './administrative-divisions'
 
 export type GoogleMapsLibraries = {

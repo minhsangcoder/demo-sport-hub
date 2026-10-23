@@ -1,28 +1,26 @@
 'use client'
 
-import React, { useState } from 'react'
-import Link from 'next/link'
-import { useRouter, useSearchParams } from 'next/navigation'
-import {
-  ChevronRight,
-  Users,
-  Calendar,
-  MapPin,
-  Clock,
-  ShieldCheck,
-  Check,
-  Sparkles,
-} from 'lucide-react'
-import { api } from '@/lib/api'
-import { useApi } from '@/lib/use-api'
-import type { Facility, Court } from '@/features/facility/types'
-import { RequireAuth } from '@/features/auth/require-auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { RequireAuth } from '@/features/auth/require-auth'
+import type { Court,Facility } from '@/features/facility/types'
 import { money } from '@/features/schedule/types'
-import type { Group } from './types'
+import { api } from '@/lib/api'
+import { useApi } from '@/lib/use-api'
+import {
+Calendar,
+ChevronRight,
+Clock,
+MapPin,
+Sparkles,
+Users
+} from 'lucide-react'
+import Link from 'next/link'
+import { useRouter,useSearchParams } from 'next/navigation'
+import React,{ useState } from 'react'
 import { QrFileUpload } from './qr-file-upload'
-import { extractInviteCode } from './qr-decoder'
+import { extractInviteCode } from './qr-parser'
+import type { Group } from './types'
 
 export function JoinPage() {
   return (

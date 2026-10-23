@@ -1,8 +1,7 @@
 'use client'
 
-import React from 'react'
-import { Trash2, AlertTriangle, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { AlertTriangle,Trash2,X } from 'lucide-react'
 
 interface DeleteGroupDialogProps {
   isOpen: boolean

@@ -11,7 +11,7 @@ const facilityId = '77000000-0000-0000-0000-000000000001'
 const ownerId = '77000000-0000-0000-0000-000000000002'
 const bindingId = '77000000-0000-0000-0000-000000000003'
 const profileId = '77000000-0000-0000-0000-000000000004'
-const permission = 'Hoàn tiền booking theo chính sách'
+const permission = 'Hoàn tiền lượt đặt theo chính sách'
 const facility = { id: facilityId, ownerId, name: 'UI fixture facility', status: 'ACTIVE', timezone: 'Asia/Ho_Chi_Minh', version: 0, amenities: [] }
 const browser = await chromium.launch({ headless: true, ...(process.env.SPORTHUB_E2E_BROWSER_CHANNEL ? { channel: process.env.SPORTHUB_E2E_BROWSER_CHANNEL } : {}) })
 const contexts = []
@@ -181,7 +181,7 @@ try {
   }
   const legacy = await fixture({ role: 'CUSTOMER', legacyHold: true })
   await legacy.page.goto(`${base}/customer/booking/holds/${bindingId}`)
-  await legacy.page.getByText('Booking hoặc giữ chỗ cũ chưa có chính sách hoàn được chốt.', { exact: false }).waitFor()
+  await legacy.page.getByText('Lượt đặt hoặc giữ chỗ cũ chưa có chính sách hoàn được chốt.', { exact: false }).waitFor()
   assert.equal(await legacy.page.getByRole('button', { name: 'Xác nhận và thanh toán', exact: true }).isEnabled(), false)
   console.log('PASS online/counter show frozen 80% before payment and legacy hold requires recreation')
   assert.deepEqual(errors, [])

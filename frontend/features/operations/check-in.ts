@@ -1,5 +1,5 @@
-import { api } from '@/lib/api'
 import type { Booking } from '@/features/booking/types'
+import { api } from '@/lib/api'
 
 export function checkInBooking(booking: Pick<Booking, 'id' | 'facilityId'>, raw: string): Promise<Booking> {
   const value = raw.trim()
@@ -9,7 +9,7 @@ export function checkInBooking(booking: Pick<Booking, 'id' | 'facilityId'>, raw:
     })
   }
   if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value)) {
-    throw new Error('Nhập mã check-in gồm 10 ký tự hoặc mã QR hợp lệ.')
+    throw new Error('Nhập mã xác nhận vào sân gồm 10 ký tự hoặc mã QR hợp lệ.')
   }
   return api<Booking>(`/bookings/${booking.id}/check-in`, { method: 'POST', body: JSON.stringify({ token: value }) })
 }

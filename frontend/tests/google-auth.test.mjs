@@ -11,6 +11,8 @@ const sourceFiles = {
   callback: new URL('../features/auth/google-auth-callback.tsx', import.meta.url),
   api: new URL('../lib/api.ts', import.meta.url),
   errorTranslator: new URL('../lib/error-translator.ts', import.meta.url),
+  displayLabels: new URL('../lib/display-labels.ts', import.meta.url),
+  readState: new URL('../lib/read-state.ts', import.meta.url),
 }
 const compiled = Object.fromEntries(Object.entries(sourceFiles).map(([name, path]) => [
   name,
@@ -38,6 +40,8 @@ function loadModule(name, globals, overrides = {}, cache = new Map()) {
     './google-auth-state': 'state',
     '@/lib/api': 'api',
     './error-translator': 'errorTranslator',
+    './display-labels': 'displayLabels',
+    './read-state': 'readState',
   }
   vm.runInNewContext(compiled[name], {
     exports,
@@ -50,6 +54,14 @@ function loadModule(name, globals, overrides = {}, cache = new Map()) {
       if (id === 'next/link') return { default: 'a' }
       if (Object.hasOwn(overrides, id)) return overrides[id]
       if (dependencies[id]) return loadModule(dependencies[id], globals, overrides, cache)
+      if (id.startsWith('.')) {
+        const key = new URL(id + '.ts', sourceFiles[name]).href
+        if (!sourceFiles[key]) {
+          sourceFiles[key] = new URL(key)
+          compiled[key] = ts.transpileModule(readFileSync(sourceFiles[key], 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+        }
+        return loadModule(key, globals, overrides, cache)
+      }
       throw new Error(`Unexpected dependency: ${id}`)
     },
   }, { filename: sourceFiles[name].pathname })

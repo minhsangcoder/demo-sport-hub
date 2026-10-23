@@ -1,11 +1,11 @@
 'use client'
 
-import { useState } from 'react'
-import { api, ApiError } from '@/lib/api'
-import { useApi } from '@/lib/use-api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { transferFeeBpsToPercent, transferFeePercentToBps, type TransferFeePolicy } from './transfer-fee-policy'
+import { ApiError,api } from '@/lib/api'
+import { useApi } from '@/lib/use-api'
+import { useState } from 'react'
+import { transferFeeBpsToPercent,transferFeePercentToBps,type TransferFeePolicy } from './transfer-fee-policy'
 
 export function TransferFeePolicyEditor({ facilityId }: { facilityId: string }) {
   const path = `/owner/facilities/${facilityId}/transfer-fee-policy`
@@ -36,15 +36,15 @@ export function TransferFeePolicyEditor({ facilityId }: { facilityId: string }) 
   const current = policy.data
   return <section className="mt-8 max-w-2xl space-y-4 border-t pt-6">
     <h3 className="text-xl font-bold">Phí chuyển nhượng của cơ sở</h3>
-    <p className="text-sm text-slate-600">Cơ sở nhận thanh toán DEMO của người mua, hưởng khoản phí bạn cấu hình và có nghĩa vụ trả phần còn lại cho người bán. Người mua nhận quyền sau thanh toán DEMO thành công, không phải chờ trả người bán.</p>
-    <p className="text-sm text-slate-600">SportHub không hưởng khoản phí này. Tỷ lệ hoàn khi hủy booking được cấu hình riêng tại Chính sách hoàn tiền.</p>
-    {!current.configured && <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">Chưa cấu hình phí. Owner cần lưu tỷ lệ trước khi có chuyển nhượng mới. Bạn có thể chọn 0%; không cần cấu hình tài khoản ngân hàng để DEMO.</p>}
+    <p className="text-sm text-slate-600">Cơ sở nhận thanh toán mô phỏng của người mua, hưởng khoản phí bạn cấu hình và có nghĩa vụ trả phần còn lại cho người bán. Người mua nhận quyền sau thanh toán mô phỏng thành công, không phải chờ trả người bán.</p>
+    <p className="text-sm text-slate-600">SportHub không hưởng khoản phí này. Tỷ lệ hoàn khi hủy lượt đặt được cấu hình riêng tại Chính sách hoàn tiền.</p>
+    {!current.configured && <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">Chưa cấu hình phí. chủ cơ sở cần lưu tỷ lệ trước khi có chuyển nhượng mới. Bạn có thể chọn 0%; không cần cấu hình tài khoản ngân hàng để mô phỏng.</p>}
     {current.configured && <p className="text-sm">Phí hiện tại: <strong>{transferFeeBpsToPercent(current.feeBps)}%</strong> · Phiên bản {current.version}</p>}
     <form key={`${current.version}:${current.feeBps}`} onSubmit={submit} className="space-y-4 rounded-2xl border p-5">
       <label className="grid gap-2 text-sm font-medium">Phí chuyển nhượng (%)
         <Input name="feePercent" required inputMode="decimal" autoComplete="off" placeholder="Nhập tỷ lệ của cơ sở" defaultValue={transferFeeBpsToPercent(current.feeBps)} disabled={busy} aria-describedby="transfer-fee-help" />
       </label>
-      <p id="transfer-fee-help" className="text-sm text-slate-500">Từ 0 đến 100%, tối đa 2 chữ số thập phân. Giao dịch đã được chấp nhận giữ phí đã chốt; chỉ Owner thay đổi cấu hình.</p>
+      <p id="transfer-fee-help" className="text-sm text-slate-500">Từ 0 đến 100%, tối đa 2 chữ số thập phân. Giao dịch đã được chấp nhận giữ phí đã chốt; chỉ chủ cơ sở thay đổi cấu hình.</p>
       {error && <p role="alert" className="text-red-700">{error}</p>}
       {conflict && <Button type="button" onClick={() => { setConflict(false); setError(''); policy.reload() }}>Tải phí mới</Button>}
       {saved && <p role="status" className="text-emerald-700">Đã lưu phí chuyển nhượng của cơ sở.</p>}

@@ -1,34 +1,30 @@
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { RequireAuth } from '@/features/auth/require-auth'
+import { Countdown } from '@/features/booking/countdown'
+import { ParticipantDemoMoney,PolicyCancellationPanel } from '@/features/booking/demo-finance'
+import { RefundPolicyNotice } from '@/features/booking/refund-policy-notice'
+import type { Payment } from '@/features/booking/types'
+import type { Court,Facility } from '@/features/facility/types'
+import { money } from '@/features/schedule/types'
+import { api } from '@/lib/api'
+import { useAuth } from '@/lib/auth-context'
+import { useApi } from '@/lib/use-api'
+import {
+Check,
+EyeOff,
+RotateCcw,
+Trash2
+} from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import {
-  Trash2,
-  RotateCcw,
-  EyeOff,
-  Check,
-  AlertCircle,
-  Clock,
-  MapPin,
-  Calendar,
-} from 'lucide-react'
-import { api } from '@/lib/api'
-import { useApi } from '@/lib/use-api'
-import { useAuth } from '@/lib/auth-context'
-import { RequireAuth } from '@/features/auth/require-auth'
-import { Button } from '@/components/ui/button'
-import { Countdown } from '@/features/booking/countdown'
-import { money } from '@/features/schedule/types'
-import type { Facility, Court } from '@/features/facility/types'
-import type { Payment } from '@/features/booking/types'
-import { type Group, groupStates } from './types'
-import { GroupExtras } from '@/features/integration/group'
-import { GroupPaymentTracking } from './payment-tracking'
-import { RefundPolicyNotice } from '@/features/booking/refund-policy-notice'
-import { ParticipantDemoMoney, PolicyCancellationPanel } from '@/features/booking/demo-finance'
-import { useHiddenGroups } from './hidden-groups'
+import { useEffect,useState } from 'react'
 import { DeleteGroupDialog } from './delete-group-dialog'
+import { GroupExtras } from './group-extras'
+import { useHiddenGroups } from './hidden-groups'
+import { GroupPaymentTracking } from './payment-tracking'
+import { type Group,groupStates } from './types'
 
 export function GroupDetail({ id }: { id: string }) {
   return (
@@ -119,7 +115,7 @@ function Loaded({ id }: { id: string }) {
         method: 'POST',
         body:
           action === 'cancel'
-            ? JSON.stringify({ reason: 'Booking Owner cancelled the unpaid group' })
+            ? JSON.stringify({ reason: 'Người tổ chức hủy lượt đặt nhóm chưa thanh toán' })
             : undefined,
       })
       if (action === 'leave') router.push('/customer/groups')
@@ -348,7 +344,7 @@ function Loaded({ id }: { id: string }) {
           className="mt-6 block rounded-2xl bg-emerald-600 p-4 text-center font-bold text-white shadow-xs hover:bg-emerald-700"
           href={`/customer/bookings/${id}`}
         >
-          Mở booking và mã check-in
+          Mở lượt đặt và mã xác nhận vào sân
         </Link>
       )}
 

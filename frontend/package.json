@@ -11,7 +11,11 @@
     "test:auth": "node --test tests/google-auth.test.mjs",
     "lint": "eslint app components features lib tests",
     "test": "node --test tests/*.test.mjs",
-    "test:e2e": "node tests/system-e2e.mjs"
+    "test:e2e": "node tests/system-e2e.mjs",
+    "format:refactor": "node scripts/format-refactor.mjs --write",
+    "format:check": "node scripts/format-refactor.mjs",
+    "check:modules": "node ../scripts/refactor/check-modules.mjs",
+    "lint:refactor": "node scripts/lint-refactor.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -40,6 +44,7 @@
     "eslint": "^9.0.0",
     "eslint-config-next": "16.3.3",
     "postcss": "^8.5",
+    "prettier": "3.8.1",
     "tailwindcss": "^4.3.3",
     "typescript": "5.7.3"
   }

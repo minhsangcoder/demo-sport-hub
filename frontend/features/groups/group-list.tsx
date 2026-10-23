@@ -1,28 +1,23 @@
 'use client'
 
-import React, { useState } from 'react'
-import Link from 'next/link'
-import {
-  Users,
-  Plus,
-  KeyRound,
-  Trash2,
-  RotateCcw,
-  EyeOff,
-  Check,
-  Calendar,
-  AlertCircle,
-  Clock,
-  Sparkles,
-} from 'lucide-react'
-import { useApi } from '@/lib/use-api'
-import { useAuth } from '@/lib/auth-context'
 import { RequireAuth } from '@/features/auth/require-auth'
-import { Button } from '@/components/ui/button'
 import { money } from '@/features/schedule/types'
-import { type Group, groupStates } from './types'
-import { useHiddenGroups } from './hidden-groups'
+import { useAuth } from '@/lib/auth-context'
+import { useApi } from '@/lib/use-api'
+import {
+Calendar,
+Check,
+KeyRound,
+Plus,
+RotateCcw,
+Trash2,
+Users
+} from 'lucide-react'
+import Link from 'next/link'
+import React,{ useState } from 'react'
 import { DeleteGroupDialog } from './delete-group-dialog'
+import { useHiddenGroups } from './hidden-groups'
+import { type Group,groupStates } from './types'
 
 type TabType = 'ALL' | 'ACTIVE' | 'FINISHED' | 'HIDDEN'
 

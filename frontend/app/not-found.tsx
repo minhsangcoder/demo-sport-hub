@@ -2,7 +2,7 @@ import { LinkButton } from "@/components/ui";
 export default function NotFound() {
   return (
     <div className="container narrow empty-state">
-      <p className="eyebrow">404 · OUT OF COURT</p>
+      <p className="eyebrow">404 · KHÔNG TÌM THẤY TRANG</p>
       <h1>Trang này không còn trong cuộc chơi.</h1>
       <p>
         Đường dẫn không tồn tại. Khám phá sân hoặc trở về trang chủ để tiếp tục.

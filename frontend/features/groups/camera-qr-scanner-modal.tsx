@@ -1,9 +1,9 @@
 'use client'
 
-import React, { useEffect, useRef, useState } from 'react'
-import { Camera, X, AlertCircle, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { scanVideoFrame } from './qr-decoder'
+import { AlertCircle, Camera, RefreshCw, X } from 'lucide-react'
+import { useRef } from 'react'
+import { useQrCamera } from './use-qr-camera'
 
 interface CameraQrScannerModalProps {
   isOpen: boolean
@@ -18,134 +18,12 @@ export function CameraQrScannerModal({
 }: CameraQrScannerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const animationFrameRef = useRef<number | null>(null)
-
-  const [hasCamera, setHasCamera] = useState<boolean | null>(null)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [isInitializing, setIsInitializing] = useState(false)
-
-  useEffect(() => {
-    if (!isOpen) {
-      stopCamera()
-      return
-    }
-
-    startCamera()
-
-    return () => {
-      stopCamera()
-    }
-  }, [isOpen])
-
-  function stopCamera() {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current)
-      animationFrameRef.current = null
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop())
-      streamRef.current = null
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null
-    }
-  }
-
-  async function startCamera() {
-    setIsInitializing(true)
-    setErrorMessage(null)
-
-    if (
-      typeof navigator === 'undefined' ||
-      !navigator.mediaDevices ||
-      !navigator.mediaDevices.getUserMedia
-    ) {
-      setHasCamera(false)
-      setErrorMessage(
-        'Trình duyệt này không hỗ trợ truy cập camera hoặc đang ở kết nối không bảo mật (yêu cầu HTTPS/localhost).'
-      )
-      setIsInitializing(false)
-      return
-    }
-
-    try {
-      // Try back camera first on mobile devices, or fallback to any camera
-      let stream: MediaStream
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' } },
-          audio: false,
-        })
-      } catch {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false,
-        })
-      }
-
-      streamRef.current = stream
-      setHasCamera(true)
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        // Play video
-        await videoRef.current.play().catch(() => {})
-      }
-
-      setIsInitializing(false)
-      startScanningLoop()
-    } catch (err: unknown) {
-      setIsInitializing(false)
-      setHasCamera(false)
-      const error = err as { name?: string; message?: string }
-      if (
-        error.name === 'NotAllowedError' ||
-        error.name === 'PermissionDeniedError'
-      ) {
-        setErrorMessage(
-          'Quyền truy cập camera bị từ chối. Vui lòng cấp quyền trong cài đặt trình duyệt hoặc chọn tải ảnh QR lên.'
-        )
-      } else if (
-        error.name === 'NotFoundError' ||
-        error.name === 'DevicesNotFoundError'
-      ) {
-        setErrorMessage('Không tìm thấy thiết bị camera trên máy của bạn.')
-      } else {
-        setErrorMessage(
-          'Không thể khởi động camera. Vui lòng thử tải ảnh mã QR lên.'
-        )
-      }
-    }
-  }
-
-  function startScanningLoop() {
-    const scan = () => {
-      if (!videoRef.current || !canvasRef.current || !streamRef.current) {
-        return
-      }
-
-      const video = videoRef.current
-      const canvas = canvasRef.current
-
-      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-        const detected = scanVideoFrame(video, canvas)
-        if (detected) {
-          // Success feedback
-          if (typeof navigator !== 'undefined' && navigator.vibrate) {
-            navigator.vibrate(100)
-          }
-          stopCamera()
-          onScanSuccess(detected)
-          return
-        }
-      }
-
-      animationFrameRef.current = requestAnimationFrame(scan)
-    }
-
-    animationFrameRef.current = requestAnimationFrame(scan)
-  }
+  const { hasCamera, errorMessage, isInitializing, startCamera } = useQrCamera(
+    isOpen,
+    onScanSuccess,
+    videoRef,
+    canvasRef,
+  )
 
   if (!isOpen) return null
 
@@ -164,15 +42,10 @@ export function CameraQrScannerModal({
               <Camera className="h-5 w-5" />
             </div>
             <div>
-              <h2
-                id="camera-modal-title"
-                className="font-bold text-slate-900 text-base"
-              >
+              <h2 id="camera-modal-title" className="font-bold text-slate-900 text-base">
                 Quét mã QR bằng Camera
               </h2>
-              <p className="text-xs text-slate-500">
-                Hướng camera về phía mã QR mời
-              </p>
+              <p className="text-xs text-slate-500">Hướng camera về phía mã QR mời</p>
             </div>
           </div>
           <button
@@ -191,12 +64,7 @@ export function CameraQrScannerModal({
           <canvas ref={canvasRef} className="hidden" />
 
           {/* Live video */}
-          <video
-            ref={videoRef}
-            playsInline
-            muted
-            className="h-full w-full object-cover"
-          />
+          <video ref={videoRef} playsInline muted className="h-full w-full object-cover" />
 
           {/* Scanner Overlay UI */}
           {hasCamera && !errorMessage && !isInitializing && (
@@ -229,9 +97,7 @@ export function CameraQrScannerModal({
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-950/60 text-red-400 ring-1 ring-red-500/30">
                 <AlertCircle className="h-6 w-6" />
               </div>
-              <p className="mt-3 text-sm font-medium text-slate-200">
-                {errorMessage}
-              </p>
+              <p className="mt-3 text-sm font-medium text-slate-200">{errorMessage}</p>
               <Button
                 type="button"
                 variant="outline"
@@ -248,8 +114,7 @@ export function CameraQrScannerModal({
         {/* Footer tips */}
         <div className="border-t border-slate-100 bg-slate-50 px-5 py-3 text-center">
           <p className="text-xs text-slate-500">
-            Mẹo: Giữ ảnh QR thẳng và đủ ánh sáng để hệ thống nhận diện nhanh
-            nhất.
+            Mẹo: Giữ ảnh QR thẳng và đủ ánh sáng để hệ thống nhận diện nhanh nhất.
           </p>
         </div>
       </div>

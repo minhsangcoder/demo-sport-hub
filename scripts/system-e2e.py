@@ -183,7 +183,9 @@ def main():
         env = dict(os.environ)
         env.update({'MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED':'true', 'SERVER_ADDRESS':'127.0.0.1',
                     'SPRING_DATASOURCE_USERNAME':PG_USER, 'SPRING_DATASOURCE_PASSWORD':PG_PASSWORD,
-                    'SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE':'4', 'SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE':'1',
+                    # Match the application's configured ceiling. A synthetic ceiling of four
+                    # can deadlock existing nested permission RowMapper reads during UI fan-out.
+                    'SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE':'10', 'SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE':'1',
                     'SPRING_RABBITMQ_HOST':'127.0.0.1', 'SPRING_RABBITMQ_PORT':str(ports['rabbit']),
                     'SPRING_RABBITMQ_USERNAME':'phase12_test', 'SPRING_RABBITMQ_PASSWORD':'phase12_synthetic_only',
                     'SPRING_RABBITMQ_VIRTUAL_HOST':'phase12', 'DEMO_SEED_ENABLED':'false',
@@ -220,9 +222,11 @@ def main():
             print('Ready:', name, flush=True)
         frontend_env = dict(env, GATEWAY_URL=f'http://127.0.0.1:{ports["gateway"]}', NEXT_TELEMETRY_DISABLED='1', PORT=str(ports['frontend']), HOSTNAME='127.0.0.1')
         standalone=FRONTEND_ROOT/'.next/standalone'
-        runtime = standalone if (standalone/'server.js').is_file() else standalone/FRONTEND_ROOT.name
-        if not (runtime/'server.js').is_file():
-            raise RuntimeError('Standalone frontend server is missing: '+str(runtime))
+        entries = [entry for entry in standalone.rglob('server.js')
+                   if 'node_modules' not in entry.relative_to(standalone).parts]
+        if len(entries) != 1:
+            raise RuntimeError('Expected one standalone application entry: '+str(entries))
+        runtime = entries[0].parent
         shutil.copytree(FRONTEND_ROOT/'.next/static',runtime/'.next/static',dirs_exist_ok=True)
         shutil.copytree(FRONTEND_ROOT/'public',runtime/'public',dirs_exist_ok=True)
         frontend = spawn([NODE, str(runtime/'server.js')], frontend_env, 'frontend-runtime')

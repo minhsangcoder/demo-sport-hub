@@ -8,59 +8,319 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { demoVnd } from '@/features/facility/demo-report'
 
-type Settlement = { acquisitionId: string; bookingId: string; sellerId: string; buyerId: string; amount: string; feeBps: number; feeAmount: string; sellerNetAmount: string; payoutState: string; paidAt?: string | null }
-type Refund = { id: string; bookingId: string; baseAmount: string; rateBps: number; targetAmount: string; yourRefundAmount?: string; recipientKind?:string;recipientLabel?:string;reason: string; state: string; refundedAt?: string | null }
-type Finance = { mode: 'DEMO'; canPaySeller?: boolean; canRefund?: boolean; settlements: Settlement[]; refunds: Refund[] }
-type Quote = { id: string; bookingId: string; baseAmount: string; rateBps: number; targetAmount: string; expiresAt: string }
-const payoutLabels: Record<string, string> = { UNPAID: 'Chờ cơ sở trả DEMO', FAILED: 'Trả DEMO thất bại — vẫn còn nghĩa vụ', PAID: 'Đã trả DEMO', NOT_REQUIRED: 'Không có khoản phải trả' }
-const refundLabels: Record<string, string> = { PENDING: 'Chờ cơ sở hoàn DEMO', FAILED: 'Hoàn DEMO thất bại — đang chờ thử lại', REFUNDED: 'Đã hoàn DEMO', NO_REFUND: 'Không phát sinh tiền hoàn' }
+type Settlement = {
+  acquisitionId: string
+  bookingId: string
+  sellerId: string
+  buyerId: string
+  amount: string
+  feeBps: number
+  feeAmount: string
+  sellerNetAmount: string
+  payoutState: string
+  paidAt?: string | null
+}
+type Refund = {
+  id: string
+  bookingId: string
+  baseAmount: string
+  rateBps: number
+  targetAmount: string
+  yourRefundAmount?: string
+  recipientKind?: string
+  recipientLabel?: string
+  reason: string
+  state: string
+  refundedAt?: string | null
+}
+type Finance = {
+  mode: 'DEMO'
+  canPaySeller?: boolean
+  canRefund?: boolean
+  settlements: Settlement[]
+  refunds: Refund[]
+}
+type Quote = {
+  id: string
+  bookingId: string
+  baseAmount: string
+  rateBps: number
+  targetAmount: string
+  expiresAt: string
+}
+const payoutLabels: Record<string, string> = {
+  UNPAID: 'Chờ cơ sở trả mô phỏng',
+  FAILED: 'Trả mô phỏng thất bại — vẫn còn nghĩa vụ',
+  PAID: 'Đã trả mô phỏng',
+  NOT_REQUIRED: 'Không có khoản phải trả',
+}
+const refundLabels: Record<string, string> = {
+  PENDING: 'Chờ cơ sở hoàn mô phỏng',
+  FAILED: 'Hoàn mô phỏng thất bại — đang chờ thử lại',
+  REFUNDED: 'Đã hoàn mô phỏng',
+  NO_REFUND: 'Không phát sinh tiền hoàn',
+}
 export function notifyDemoMoneyChanged() {
   window.dispatchEvent(new Event('sporthub:demo-money-changed'))
-  try { localStorage.setItem('sporthub:demo-money-changed', `${Date.now()}:${crypto.randomUUID()}`) } catch { /* A blocked browser store does not affect the committed server operation. */ }
+  try {
+    localStorage.setItem('sporthub:demo-money-changed', `${Date.now()}:${crypto.randomUUID()}`)
+  } catch {
+    /* A blocked browser store does not affect the committed server operation. */
+  }
 }
 const notify = notifyDemoMoneyChanged
 
-export function FacilityDemoMoneyPanel({ facilityId, canReadBooking = true }: { facilityId: string; canReadBooking?: boolean }) {
+export function FacilityDemoMoneyPanel({
+  facilityId,
+  canReadBooking = true,
+}: {
+  facilityId: string
+  canReadBooking?: boolean
+}) {
   const resource = useApi<Finance>(`/bookings/demo-finance/facility/${facilityId}`)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const intents = useRef<Record<string, { outcome: string; key: string }>>({})
-  useEffect(() => { window.addEventListener('sporthub:demo-money-changed', resource.reload); return () => window.removeEventListener('sporthub:demo-money-changed', resource.reload) }, [resource.reload])
-  async function execute(kind: 'settlements' | 'refunds', id: string, outcome: 'SUCCESS' | 'FAILED') {
+  useEffect(() => {
+    window.addEventListener('sporthub:demo-money-changed', resource.reload)
+    return () => window.removeEventListener('sporthub:demo-money-changed', resource.reload)
+  }, [resource.reload])
+  async function execute(
+    kind: 'settlements' | 'refunds',
+    id: string,
+    outcome: 'SUCCESS' | 'FAILED',
+  ) {
     if (busy) return
     const target = `${kind}:${id}`
-    if (intents.current[target]?.outcome !== outcome) intents.current[target] = { outcome, key: crypto.randomUUID() }
-    setBusy(target); setError('')
+    if (intents.current[target]?.outcome !== outcome)
+      intents.current[target] = { outcome, key: crypto.randomUUID() }
+    setBusy(target)
+    setError('')
     try {
-      await api(`/bookings/demo-finance/${kind}/${id}/${kind === 'settlements' ? 'pay-seller' : 'complete'}`, { method: 'POST', headers: { 'Idempotency-Key': intents.current[target].key }, body: JSON.stringify({ outcome }) })
+      await api(
+        `/bookings/demo-finance/${kind}/${id}/${kind === 'settlements' ? 'pay-seller' : 'complete'}`,
+        {
+          method: 'POST',
+          headers: { 'Idempotency-Key': intents.current[target].key },
+          body: JSON.stringify({ outcome }),
+        },
+      )
       notify()
-    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Chưa ghi nhận được kết quả DEMO. Hãy tải lại hoặc thử cùng thao tác.') }
-    finally { setBusy('') }
+    } catch (failure) {
+      setError(
+        failure instanceof Error
+          ? failure.message
+          : 'Chưa ghi nhận được kết quả mô phỏng. Hãy tải lại hoặc thử cùng thao tác.',
+      )
+    } finally {
+      setBusy('')
+    }
   }
-  const valid = resource.data && Array.isArray(resource.data.settlements) && Array.isArray(resource.data.refunds)
+  const valid =
+    resource.data &&
+    Array.isArray(resource.data.settlements) &&
+    Array.isArray(resource.data.refunds)
   const data = !resource.loading && valid ? resource.data : null
-  return <section className="mt-6 space-y-4 rounded-2xl border bg-white p-5">
-    <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-bold">Trả người chuyển nhượng &amp; hoàn tiền DEMO</h2><Button variant="outline" onClick={resource.reload} disabled={Boolean(busy) || resource.loading}>Tải lại nghĩa vụ</Button></div>
-    <p className="text-sm text-amber-800">Thao tác giả lập được lưu trong hệ thống, không chuyển tiền thật. B đã nhận quyền không phải chờ cơ sở trả người bán.</p>
-    {resource.loading && <p role="status" className="text-sm text-slate-500">Đang tải khoản phải thực hiện…</p>}
-    {(error || resource.error) && <p role="alert" className="text-sm text-red-700">{error || resource.error}</p>}
-    {!resource.loading && resource.data && !valid && <p role="alert" className="text-sm text-red-700">Chưa tải được dữ liệu nghĩa vụ hợp lệ. Hãy tải lại.</p>}
-    {data?.canPaySeller && <div className="space-y-3"><h3 className="font-semibold">Khoản trả người chuyển nhượng</h3>{data.settlements.map(item => <article key={item.acquisitionId} className="space-y-3 rounded-xl border p-4"><p className="font-medium">Cần trả người bán: {demoVnd(item.sellerNetAmount)}</p><p className="text-sm text-slate-600">Người mua trả {demoVnd(item.amount)} · phí cơ sở {(item.feeBps / 100).toLocaleString('vi-VN')}%: {demoVnd(item.feeAmount)}</p><p className="text-sm">{payoutLabels[item.payoutState] || 'Đang đồng bộ trạng thái'}</p>{canReadBooking && <Link href={`/customer/bookings/${item.bookingId}`} className="block text-sm text-emerald-700 underline">Xem booking liên quan</Link>}{['UNPAID', 'FAILED'].includes(item.payoutState) && <div className="flex flex-wrap gap-3"><Button onClick={() => execute('settlements', item.acquisitionId, 'SUCCESS')} disabled={Boolean(busy)} className="bg-emerald-600 text-white">Trả tiền DEMO cho A</Button><Button variant="outline" onClick={() => execute('settlements', item.acquisitionId, 'FAILED')} disabled={Boolean(busy)}>Giả lập trả A thất bại</Button></div>}</article>)}{data.settlements.length === 0 && <p className="text-sm text-slate-500">Chưa có khoản trả người chuyển nhượng.</p>}</div>}
-    {data?.canRefund && <div className="space-y-3"><h3 className="font-semibold">Yêu cầu hoàn khách</h3>{data.refunds.map(item => <article key={item.id} className="space-y-3 rounded-xl border p-4"><p className="font-medium">Khoản hoàn: {demoVnd(item.targetAmount)}</p>{item.recipientKind==='GUEST'&&<p className="text-sm">Hoàn cho khách vãng lai: {item.recipientLabel}. Nhân viên tạo booking không phải người nhận.</p>}<p className="text-sm text-slate-600">{item.reason === 'TECHNICAL_TRANSFER_FAILURE' ? 'Hoàn đủ 100% do bàn giao đã xác nhận thất bại' : `Theo chính sách ${(item.rateBps / 100).toLocaleString('vi-VN')}% trên ${demoVnd(item.baseAmount)}`}</p><p className="text-sm">{refundLabels[item.state] || 'Đang đồng bộ trạng thái'}</p>{canReadBooking && <Link href={`/customer/bookings/${item.bookingId}`} className="block text-sm text-emerald-700 underline">Xem booking liên quan</Link>}{['PENDING', 'FAILED'].includes(item.state) && <div className="flex flex-wrap gap-3"><Button onClick={() => execute('refunds', item.id, 'SUCCESS')} disabled={Boolean(busy)} className="bg-emerald-600 text-white">Hoàn tiền DEMO</Button><Button variant="outline" onClick={() => execute('refunds', item.id, 'FAILED')} disabled={Boolean(busy)}>Giả lập hoàn thất bại</Button></div>}</article>)}{data.refunds.length === 0 && <p className="text-sm text-slate-500">Chưa có yêu cầu hoàn khách.</p>}</div>}
-  </section>
+  return (
+    <section className="mt-6 space-y-4 rounded-2xl border bg-white p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-bold">Trả người chuyển nhượng &amp; hoàn tiền mô phỏng</h2>
+        <Button
+          variant="outline"
+          onClick={resource.reload}
+          disabled={Boolean(busy) || resource.loading}
+        >
+          Tải lại nghĩa vụ
+        </Button>
+      </div>
+      <p className="text-sm text-amber-800">
+        Thao tác giả lập được lưu trong hệ thống, không chuyển tiền thật. B đã nhận quyền không phải
+        chờ cơ sở trả người bán.
+      </p>
+      {resource.loading && (
+        <p role="status" className="text-sm text-slate-500">
+          Đang tải khoản phải thực hiện…
+        </p>
+      )}
+      {(error || resource.error) && (
+        <p role="alert" className="text-sm text-red-700">
+          {error || resource.error}
+        </p>
+      )}
+      {!resource.loading && resource.data && !valid && (
+        <p role="alert" className="text-sm text-red-700">
+          Chưa tải được dữ liệu nghĩa vụ hợp lệ. Hãy tải lại.
+        </p>
+      )}
+      {data?.canPaySeller && (
+        <div className="space-y-3">
+          <h3 className="font-semibold">Khoản trả người chuyển nhượng</h3>
+          {data.settlements.map((item) => (
+            <article key={item.acquisitionId} className="space-y-3 rounded-xl border p-4">
+              <p className="font-medium">Cần trả người bán: {demoVnd(item.sellerNetAmount)}</p>
+              <p className="text-sm text-slate-600">
+                Người mua trả {demoVnd(item.amount)} · phí cơ sở{' '}
+                {(item.feeBps / 100).toLocaleString('vi-VN')}%: {demoVnd(item.feeAmount)}
+              </p>
+              <p className="text-sm">
+                {payoutLabels[item.payoutState] || 'Đang đồng bộ trạng thái'}
+              </p>
+              {canReadBooking && (
+                <Link
+                  href={`/customer/bookings/${item.bookingId}`}
+                  className="block text-sm text-emerald-700 underline"
+                >
+                  Xem lượt đặt liên quan
+                </Link>
+              )}
+              {['UNPAID', 'FAILED'].includes(item.payoutState) && (
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    onClick={() => execute('settlements', item.acquisitionId, 'SUCCESS')}
+                    disabled={Boolean(busy)}
+                    className="bg-emerald-600 text-white"
+                  >
+                    Trả tiền mô phỏng cho A
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => execute('settlements', item.acquisitionId, 'FAILED')}
+                    disabled={Boolean(busy)}
+                  >
+                    Giả lập trả A thất bại
+                  </Button>
+                </div>
+              )}
+            </article>
+          ))}
+          {data.settlements.length === 0 && (
+            <p className="text-sm text-slate-500">Chưa có khoản trả người chuyển nhượng.</p>
+          )}
+        </div>
+      )}
+      {data?.canRefund && (
+        <div className="space-y-3">
+          <h3 className="font-semibold">Yêu cầu hoàn khách</h3>
+          {data.refunds.map((item) => (
+            <article key={item.id} className="space-y-3 rounded-xl border p-4">
+              <p className="font-medium">Khoản hoàn: {demoVnd(item.targetAmount)}</p>
+              {item.recipientKind === 'GUEST' && (
+                <p className="text-sm">
+                  Hoàn cho khách vãng lai: {item.recipientLabel}. Nhân viên tạo lượt đặt không phải
+                  người nhận.
+                </p>
+              )}
+              <p className="text-sm text-slate-600">
+                {item.reason === 'TECHNICAL_TRANSFER_FAILURE'
+                  ? 'Hoàn đủ 100% do bàn giao đã xác nhận thất bại'
+                  : `Theo chính sách ${(item.rateBps / 100).toLocaleString('vi-VN')}% trên ${demoVnd(item.baseAmount)}`}
+              </p>
+              <p className="text-sm">{refundLabels[item.state] || 'Đang đồng bộ trạng thái'}</p>
+              {canReadBooking && (
+                <Link
+                  href={`/customer/bookings/${item.bookingId}`}
+                  className="block text-sm text-emerald-700 underline"
+                >
+                  Xem lượt đặt liên quan
+                </Link>
+              )}
+              {['PENDING', 'FAILED'].includes(item.state) && (
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    onClick={() => execute('refunds', item.id, 'SUCCESS')}
+                    disabled={Boolean(busy)}
+                    className="bg-emerald-600 text-white"
+                  >
+                    Hoàn tiền mô phỏng
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => execute('refunds', item.id, 'FAILED')}
+                    disabled={Boolean(busy)}
+                  >
+                    Giả lập hoàn thất bại
+                  </Button>
+                </div>
+              )}
+            </article>
+          ))}
+          {data.refunds.length === 0 && (
+            <p className="text-sm text-slate-500">Chưa có yêu cầu hoàn khách.</p>
+          )}
+        </div>
+      )}
+    </section>
+  )
 }
 
 export function ParticipantDemoMoney({ bookingId }: { bookingId?: string }) {
   const { user } = useAuth()
-  const resource = useApi<Finance>(user?.roles.includes('CUSTOMER') ? '/bookings/demo-finance/mine' : null)
-  useEffect(() => { window.addEventListener('sporthub:demo-money-changed', resource.reload); return () => window.removeEventListener('sporthub:demo-money-changed', resource.reload) }, [resource.reload])
+  const resource = useApi<Finance>(
+    user?.roles.includes('CUSTOMER') ? '/bookings/demo-finance/mine' : null,
+  )
+  useEffect(() => {
+    window.addEventListener('sporthub:demo-money-changed', resource.reload)
+    return () => window.removeEventListener('sporthub:demo-money-changed', resource.reload)
+  }, [resource.reload])
   if (!user?.roles.includes('CUSTOMER')) return null
-  const settlements = resource.data?.settlements?.filter(item => !bookingId || item.bookingId === bookingId) || []
-  const refunds = resource.data?.refunds?.filter(item => !bookingId || item.bookingId === bookingId) || []
-  return <section className="mt-6 space-y-3 rounded-2xl border p-5"><div className="flex items-center justify-between gap-3"><h2 className="font-bold">Khoản trả &amp; hoàn DEMO của bạn</h2><button className="text-sm text-emerald-700 underline" onClick={resource.reload}>Tải lại</button></div>{resource.loading && <p role="status" className="text-sm text-slate-500">Đang tải giao dịch DEMO…</p>}{resource.error && <p role="alert" className="text-sm text-red-700">{resource.error}</p>}{settlements.map(item => <article key={item.acquisitionId} className="rounded-xl bg-slate-50 p-4 text-sm"><p>{item.sellerId === user.id ? `Cơ sở phải trả bạn ${demoVnd(item.sellerNetAmount)} sau phí ${demoVnd(item.feeAmount)}.` : 'Bạn đã thanh toán cho cơ sở và nhận quyền. Sử dụng sân theo lịch, không cần chờ trả người bán.'}</p><p className="mt-2">{payoutLabels[item.payoutState] || 'Đang đồng bộ trạng thái'}</p></article>)}{refunds.map(item => <article key={item.id} className="rounded-xl bg-slate-50 p-4 text-sm"><p>Phần hoàn của bạn: <strong>{demoVnd(item.yourRefundAmount ?? item.targetAmount)}</strong></p><p className="mt-2">{refundLabels[item.state] || 'Đang đồng bộ trạng thái'}</p></article>)}{!resource.loading && !resource.error && settlements.length + refunds.length === 0 && <p className="text-sm text-slate-500">Chưa phát sinh khoản trả/hoàn DEMO của bạn.</p>}<p className="text-xs text-slate-500">Kết quả mô phỏng trong hệ thống, không phát sinh tiền thật.</p></section>
+  const settlements =
+    resource.data?.settlements?.filter((item) => !bookingId || item.bookingId === bookingId) || []
+  const refunds =
+    resource.data?.refunds?.filter((item) => !bookingId || item.bookingId === bookingId) || []
+  return (
+    <section className="mt-6 space-y-3 rounded-2xl border p-5">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="font-bold">Khoản trả &amp; hoàn mô phỏng của bạn</h2>
+        <button className="text-sm text-emerald-700 underline" onClick={resource.reload}>
+          Tải lại
+        </button>
+      </div>
+      {resource.loading && (
+        <p role="status" className="text-sm text-slate-500">
+          Đang tải giao dịch mô phỏng…
+        </p>
+      )}
+      {resource.error && (
+        <p role="alert" className="text-sm text-red-700">
+          {resource.error}
+        </p>
+      )}
+      {settlements.map((item) => (
+        <article key={item.acquisitionId} className="rounded-xl bg-slate-50 p-4 text-sm">
+          <p>
+            {item.sellerId === user.id
+              ? `Cơ sở phải trả bạn ${demoVnd(item.sellerNetAmount)} sau phí ${demoVnd(item.feeAmount)}.`
+              : 'Bạn đã thanh toán cho cơ sở và nhận quyền. Sử dụng sân theo lịch, không cần chờ trả người bán.'}
+          </p>
+          <p className="mt-2">{payoutLabels[item.payoutState] || 'Đang đồng bộ trạng thái'}</p>
+        </article>
+      ))}
+      {refunds.map((item) => (
+        <article key={item.id} className="rounded-xl bg-slate-50 p-4 text-sm">
+          <p>
+            Phần hoàn của bạn:{' '}
+            <strong>{demoVnd(item.yourRefundAmount ?? item.targetAmount)}</strong>
+          </p>
+          <p className="mt-2">{refundLabels[item.state] || 'Đang đồng bộ trạng thái'}</p>
+        </article>
+      ))}
+      {!resource.loading && !resource.error && settlements.length + refunds.length === 0 && (
+        <p className="text-sm text-slate-500">Chưa phát sinh khoản trả/hoàn mô phỏng của bạn.</p>
+      )}
+      <p className="text-xs text-slate-500">
+        Kết quả mô phỏng trong hệ thống, không phát sinh tiền thật.
+      </p>
+    </section>
+  )
 }
 
-export function PolicyCancellationPanel({ bookingId, onSuccess }: { bookingId: string; onSuccess: () => void }) {
+export function PolicyCancellationPanel({
+  bookingId,
+  onSuccess,
+}: {
+  bookingId: string
+  onSuccess: () => void
+}) {
   const [quote, setQuote] = useState<Quote | null>(null)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
@@ -68,19 +328,93 @@ export function PolicyCancellationPanel({ bookingId, onSuccess }: { bookingId: s
   const intent = useRef<{ fingerprint: string; key: string } | null>(null)
   async function preview() {
     if (busy) return
-    setBusy(true); setError(''); setQuote(null)
-    try { setQuote(await api<Quote>(`/bookings/${bookingId}/cancellation-quote`, { method: 'POST' })) }
-    catch (failure) { setError(failure instanceof Error ? failure.message : 'Không thể tính khoản hoàn theo chính sách.') }
-    finally { setBusy(false) }
+    setBusy(true)
+    setError('')
+    setQuote(null)
+    try {
+      setQuote(await api<Quote>(`/bookings/${bookingId}/cancellation-quote`, { method: 'POST' }))
+    } catch (failure) {
+      setError(
+        failure instanceof Error ? failure.message : 'Không thể tính khoản hoàn theo chính sách.',
+      )
+    } finally {
+      setBusy(false)
+    }
   }
   async function cancel() {
     if (!quote || busy || !reason.trim()) return
     const body = JSON.stringify({ quoteId: quote.id, reason: reason.trim() })
-    if (intent.current?.fingerprint !== body) intent.current = { fingerprint: body, key: crypto.randomUUID() }
-    setBusy(true); setError('')
-    try { await api(`/bookings/${bookingId}/cancel-with-policy`, { method: 'POST', headers: { 'Idempotency-Key': intent.current.key }, body }); setQuote(null); notify(); onSuccess() }
-    catch (failure) { setError(failure instanceof Error ? failure.message : 'Chưa hủy được booking. Hãy xem lại chính sách.'); setQuote(null) }
-    finally { setBusy(false) }
+    if (intent.current?.fingerprint !== body)
+      intent.current = { fingerprint: body, key: crypto.randomUUID() }
+    setBusy(true)
+    setError('')
+    try {
+      await api(`/bookings/${bookingId}/cancel-with-policy`, {
+        method: 'POST',
+        headers: { 'Idempotency-Key': intent.current.key },
+        body,
+      })
+      setQuote(null)
+      notify()
+      onSuccess()
+    } catch (failure) {
+      setError(
+        failure instanceof Error
+          ? failure.message
+          : 'Chưa hủy được lượt đặt. Hãy xem lại chính sách.',
+      )
+      setQuote(null)
+    } finally {
+      setBusy(false)
+    }
   }
-  return <section className="mt-5 space-y-3 rounded-xl border border-rose-200 p-4"><h3 className="font-semibold">Hủy theo chính sách cơ sở</h3><p className="text-sm text-slate-600">Xem khoản được hoàn trước khi xác nhận hủy. Owner hoặc Staff có quyền sẽ thực hiện hoàn DEMO.</p><Button variant="outline" onClick={preview} disabled={busy}>Xem khoản hoàn khi hủy</Button>{quote && <div className="space-y-3"><p className="text-sm">Cơ sở tính: {demoVnd(quote.baseAmount)} · tỷ lệ {(quote.rateBps / 100).toLocaleString('vi-VN')}% · được hoàn <strong>{demoVnd(quote.targetAmount)}</strong>.</p><label className="grid gap-2 text-sm">Lý do hủy<Input value={reason} maxLength={500} onChange={event => setReason(event.target.value)} disabled={busy} /></label><p className="text-xs text-slate-500">Xác nhận sẽ hủy quyền sử dụng booking. Báo giá có hiệu lực 5 phút; không phát sinh tiền thật.</p><Button className="bg-rose-600 text-white" onClick={cancel} disabled={busy || !reason.trim()}>Đồng ý khoản hoàn và hủy booking</Button></div>}{error && <p role="alert" className="text-sm text-red-700">{error}</p>}</section>
+  return (
+    <section className="mt-5 space-y-3 rounded-xl border border-rose-200 p-4">
+      <h3 className="font-semibold text-rose-800">
+        Hủy theo chính sách cơ sở (Người mua chuyển nhượng)
+      </h3>
+      <p className="text-sm text-slate-600">
+        Dành cho người mua lại qua chuyển nhượng: Bạn được hoàn tiền theo tỷ lệ chính sách của cơ sở
+        tính trên số tiền bạn đã mua lại. Chủ cơ sở hoặc nhân viên được cấp quyền sẽ duyệt và hoàn
+        tiền.
+      </p>
+      <Button variant="outline" onClick={preview} disabled={busy}>
+        Xem khoản hoàn khi hủy
+      </Button>
+      {quote && (
+        <div className="space-y-3">
+          <p className="text-sm">
+            Số tiền bạn đã mua lại: <strong>{demoVnd(quote.baseAmount)}</strong> · tỷ lệ hoàn{' '}
+            {(quote.rateBps / 100).toLocaleString('vi-VN')}% · được hoàn:{' '}
+            <strong className="text-emerald-700">{demoVnd(quote.targetAmount)}</strong>.
+          </p>
+          <label className="grid gap-2 text-sm">
+            Lý do hủy
+            <Input
+              value={reason}
+              maxLength={500}
+              onChange={(event) => setReason(event.target.value)}
+              disabled={busy}
+            />
+          </label>
+          <p className="text-xs text-slate-500">
+            Xác nhận sẽ hủy quyền sử dụng lượt đặt. Báo giá có hiệu lực 5 phút; không phát sinh tiền
+            thật.
+          </p>
+          <Button
+            className="bg-rose-600 text-white"
+            onClick={cancel}
+            disabled={busy || !reason.trim()}
+          >
+            Đồng ý khoản hoàn và hủy lượt đặt
+          </Button>
+        </div>
+      )}
+      {error && (
+        <p role="alert" className="text-sm text-red-700">
+          {error}
+        </p>
+      )}
+    </section>
+  )
 }

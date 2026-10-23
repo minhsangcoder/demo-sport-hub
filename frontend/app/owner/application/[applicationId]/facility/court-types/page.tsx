@@ -1,4 +1,4 @@
-import { CourtTypes } from '@/features/integration/facility'
+import { CourtTypes } from '@/features/facility/court-types'
 
 export default function Page() {
   return <CourtTypes />

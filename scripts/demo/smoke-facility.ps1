@@ -90,11 +90,17 @@ Facility-Request "/owner/facilities/$($facilitySmokeCreated.id)/images/$($facili
 $facilitySmokeCustomer=(Invoke-RestMethod "$ApiBase/auth/login" -Method Post -ContentType 'application/json' -Body (@{identifier='customer@sporthub.local';password=$facilitySmokePassword}|ConvertTo-Json)).data
 $facilitySmokeDenied=Invoke-WebRequest "$ApiBase/owner/facilities/$($facilitySmokeCreated.id)" -Headers @{Authorization='Bearer '+$facilitySmokeCustomer.accessToken;'X-User-Role'='OWNER';'X-User-Id'=$facilitySmokeLogin.user.id} -SkipHttpErrorCheck
 if($facilitySmokeDenied.StatusCode -ne 403){throw 'Facility ownership/role scope was not enforced'}
-# App services are isolated in Compose; probe the direct service from its container.
+# App services are isolated in Compose or run locally; probe direct service to verify spoofed headers are rejected.
 Push-Location $facilitySmokeRoot
 try {
- $facilitySmokeDirect=& docker compose exec -T facility-service sh -c 'wget -S -O /dev/null --header="X-User-Role: OWNER" --header="X-User-Id: $1" http://localhost:8082/api/v1/owner/facilities 2>&1 || true' -- $facilitySmokeLogin.user.id
- if($LASTEXITCODE -ne 0 -or ($facilitySmokeDirect|Out-String) -notmatch 'HTTP/\S+ 401'){throw 'Direct service did not reject spoofable identity headers'}
+ $facilityRunning = & docker compose ps --services --filter "status=running" | Where-Object { $_ -eq 'facility-service' }
+ if ($facilityRunning) {
+   $facilitySmokeDirect=& docker compose exec -T facility-service sh -c 'wget -S -O /dev/null --header="X-User-Role: OWNER" --header="X-User-Id: $1" http://localhost:8082/api/v1/owner/facilities 2>&1 || true' -- $facilitySmokeLogin.user.id
+   if($LASTEXITCODE -ne 0 -or ($facilitySmokeDirect|Out-String) -notmatch 'HTTP/\S+ 401'){throw 'Direct service did not reject spoofable identity headers'}
+ } else {
+   $directResp = Invoke-WebRequest "http://localhost:18082/api/v1/owner/facilities" -Headers @{'X-User-Role'='OWNER';'X-User-Id'=$facilitySmokeLogin.user.id} -SkipHttpErrorCheck
+   if($directResp.StatusCode -ne 401){throw 'Direct service did not reject spoofable identity headers'}
+ }
 } finally { Pop-Location }
 Facility-Request '/auth/logout' 'Post' @{} | Out-Null
 Write-Output 'PASS: owner facility CRUD/two-level administrative address/contact and coordinates A-B/reload/legacy PUT/pair/range/type validation/Staff 403/private publication guard; public Discovery unchanged slots+prices+date and seed restored when administrative codes are available; created facility remains DRAFT; courts/maintenance; real MinIO upload/access/replacement/durable cleanup/delete; customer scope and direct header spoofing rejected.'

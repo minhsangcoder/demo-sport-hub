@@ -81,12 +81,12 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(
       {
-        error: 'Không trích xuất được tọa độ từ đường link này.',
+        error: 'Không trích xuất được tọa độ từ đường dẫn này.',
         finalUrl,
       },
       { status: 422 }
     )
-  } catch (err) {
+  } catch {
     return NextResponse.json(
       {
         error: 'Không thể kết nối hoặc phân giải đường dẫn Google Maps này.',

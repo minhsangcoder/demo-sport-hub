@@ -27,7 +27,10 @@ const Checkbox = React.forwardRef<HTMLElement, CheckboxProps>(
     ref
   ) => {
     const handleCheckedChange = React.useCallback(
-      (newChecked: boolean, event: any) => {
+      (
+        newChecked: boolean,
+        event: Parameters<NonNullable<CheckboxPrimitive.Root.Props['onCheckedChange']>>[1]
+      ) => {
         onCheckedChange?.(newChecked, event)
         if (onChange) {
           const fakeEvent = {

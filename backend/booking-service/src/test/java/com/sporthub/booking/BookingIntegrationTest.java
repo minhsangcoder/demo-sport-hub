@@ -1518,4 +1518,46 @@ class BookingIntegrationTest {
   assertThat(service.detail(b.id(),revoked,"token").checkinToken()).isNotNull();assertThat(service.detail(b.id(),revoked,"token").booking().currentHolderId()).isEqualTo(actor.id());
   assertThat(service.mine(revoked,"token")).extracting(Booking::id).contains(b.id());
  }
+ @Test void availabilityReadsOnlyTheLocalDayAndPreviewRangeAcrossDstAndMidnight(){
+  var zone=ZoneId.of("Europe/Berlin");var day=LocalDate.of(2026,10,25);
+  Instant from=day.atStartOfDay(zone).toInstant(),to=day.plusDays(1).atStartOfDay(zone).toInstant();
+  assertThat(Duration.between(from,to).toHours()).isEqualTo(25);
+  Instant repeated=Instant.parse("2026-10-25T00:30:00Z"),second=repeated.plusSeconds(3600);
+  assertThat(repeated.atZone(zone).toLocalTime()).isEqualTo(second.atZone(zone).toLocalTime());
+  start=repeated;end=start.plusSeconds(1800);var booked=legacyConfirmedProof(true,true,false);court=booked.courtId();
+  var first=from.plusSeconds(1800);var late=to.minusSeconds(1800);var beyond=to.plusSeconds(3600);
+  for(var row:List.of(new Instant[]{from.minusSeconds(3600),from,now.plusSeconds(60)},
+    new Instant[]{first,first.plusSeconds(1800),now.minusSeconds(1)},
+    new Instant[]{late,to.plusSeconds(1800),now.plusSeconds(60)},
+    new Instant[]{beyond,beyond.plusSeconds(1800),now.plusSeconds(60)},
+    new Instant[]{from.minusSeconds(172800),from.minusSeconds(171000),now.plusSeconds(60)})){
+    repo.jdbc().update("INSERT INTO slot_reservations(id,court_id,facility_id,holder_id,starts_at,ends_at,expires_at,state,quote) VALUES(?,?,?,?,?,?,?,'HOLD','{}')",
+      UUID.randomUUID(),court,facility,user.id(),java.sql.Timestamp.from(row[0]),java.sql.Timestamp.from(row[1]),java.sql.Timestamp.from(row[2]));
+  }
+  var preview=json.createObjectNode().put("facilityId",facility.toString()).put("timezone",zone.getId());
+  for(var slot:List.of(new Instant[]{first,first.plusSeconds(1800)},new Instant[]{repeated,repeated.plusSeconds(1800)},
+    new Instant[]{second,second.plusSeconds(1800)},new Instant[]{late,to.plusSeconds(1800)},new Instant[]{beyond,beyond.plusSeconds(1800)})){
+    preview.withArray("slots").addObject().put("state","ELIGIBLE").put("startsAt",slot[0].toString()).put("endsAt",slot[1].toString()).put("amount",150000).put("currency","VND");
+  }
+  when(dependencies.preview(court,day.toString())).thenAnswer(a->{
+    assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+    assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isCurrentTransactionReadOnly()).isTrue();
+    return preview;
+  });
+  var result=service.availability(court,day.toString());
+  assertThat(result.path("slots").findValuesAsText("state")).containsExactly("AVAILABLE","BLOCKED","AVAILABLE","BLOCKED","BLOCKED");
+  assertThat(result.path("slots").get(1).path("reason").asText()).isEqualTo("BOOKED");
+  assertThat(result.path("slots").get(3).path("reason").asText()).isEqualTo("HELD");
+  verify(dependencies,times(2)).preview(court,day.toString());
+ }
+ @Test void availabilityUsesThePreviewReadAfterTheConfigurationFence(){
+  var date=now.atZone(ZoneId.of("Asia/Ho_Chi_Minh")).toLocalDate().toString();
+  var first=json.createObjectNode().put("facilityId",facility.toString()).put("timezone","Asia/Ho_Chi_Minh");
+  first.putArray("slots").addObject().put("state","ELIGIBLE").put("startsAt",start.toString()).put("endsAt",end.toString()).put("amount",150000);
+  var updated=first.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)updated.path("slots").get(0)).put("amount",175000);
+  when(dependencies.preview(court,date)).thenReturn(first,updated);
+  assertThat(service.availability(court,date).path("slots").get(0).path("amount").intValue()).isEqualTo(175000);
+  verify(dependencies,times(2)).preview(court,date);
+ }
+
 }
