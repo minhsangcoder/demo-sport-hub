@@ -3,9 +3,9 @@ import type { useFacilityReport } from '@/features/facility/report/use-facility-
 export function ReportKpis({
   model,
 }: {
-  model: Pick<ReturnType<typeof useFacilityReport>, 'amount' | 'money' | 'stats'>
+  model: Pick<ReturnType<typeof useFacilityReport>, 'amount' | 'money' | 'stats' | 'mode'>
 }) {
-  const { amount, money, stats } = model
+  const { amount, money, stats, mode } = model
   if (!money || !stats) return null
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -24,7 +24,9 @@ export function ReportKpis({
         [
           'Đã hoàn theo chính sách',
           amount(money.policyRefunded),
-          'Chỉ khoản hoàn mô phỏng thành công trong kỳ',
+          mode === 'REAL'
+            ? 'Theo xác nhận chuyển khoản của cơ sở trong kỳ'
+            : 'Chỉ khoản hoàn mô phỏng thành công trong kỳ',
         ],
         [
           'Khoản thu sau hoàn',

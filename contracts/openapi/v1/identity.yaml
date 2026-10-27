@@ -2028,6 +2028,50 @@
           }
         }
       }
+    },
+    "/users/me/market-restriction": {
+      "get": {
+        "tags": [
+          "Profile"
+        ],
+        "operationId": "getOwnMarketRestrictionProjection",
+        "summary": "Trạng thái hạn chế chợ của chính người dùng; bản sao hiển thị, Booking vẫn kiểm quyền mỗi giao dịch.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "NOT_RECORDED không có nghĩa được phép tạo giao dịch. Không dùng trạng thái này để bỏ qua Booking admission.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "private, no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MarketRestrictionProjection"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2966,13 +3010,25 @@
             "items": {
               "$ref": "#/components/schemas/FacilityBinding"
             }
+          },
+          "status": {
+            "type": "string"
+          },
+          "emailVerified": {
+            "type": "boolean"
+          },
+          "phoneVerified": {
+            "type": "boolean"
           }
         },
         "required": [
           "id",
           "fullName",
           "roles",
-          "facilityBindings"
+          "facilityBindings",
+          "status",
+          "emailVerified",
+          "phoneVerified"
         ]
       },
       "StaffAssignmentInput": {
@@ -3847,6 +3903,56 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          }
+        }
+      },
+      "MarketRestrictionProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "projectionOnly",
+          "authority",
+          "state"
+        ],
+        "properties": {
+          "projectionOnly": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "authority": {
+            "type": "string",
+            "enum": [
+              "BOOKING"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "NOT_RECORDED",
+              "RECORDED"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "strikeCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "permanent": {
+            "type": "boolean"
+          },
+          "blockedUntil": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       }

@@ -8,6 +8,8 @@ export function responseFor(url, role) {
   const user = { id: id(role === 'OWNER' ? 2 : 3), roles: [role], fullName: `Tài khoản thử ${role}`, email: 'performance@example.invalid', status: 'ACTIVE', emailVerified: true, phoneVerified: false }
   if (path === '/auth/refresh') return role === 'PUBLIC' ? { status: 401, data: null } : { data: { accessToken: 'synthetic-fixture-only', tokenType: 'Bearer', expiresIn: 300, user } }
   if (path === '/sport-categories') return { data: [{ id: id(4), name: 'Cầu lông', active: true }] }
+  if (path === '/payments/runtime') return { data: { mode: 'DEMO', realEnabled: false, demoEnabled: true } }
+  if (path === '/bookings/admission') return {data:{policyVersion:1,maxConcurrent:1,policyAvailability:'COMPLETE',holdBlockedUntil:null,onlineBlockedUntil:null,marketBlockedUntil:null,marketPermanent:false,strikeCount:0,resources:[]}}
   if (path === '/bookings/search') return { data: { items: [1, 2, 3].map(n => ({ facility, courtId: id(10 + n), courtName: `Sân đo ${n}`, sportCategoryId: id(4), sportName: 'Cầu lông', date: playDate, fromPrice: 120000, currency: 'VND', availableSlots: 8, firstStartsAt: `${playDate}T08:00:00Z`, firstEndsAt: `${playDate}T09:00:00Z`, distanceKm: null })), truncated: false } }
   if (path === '/owner/facilities' || path === '/facilities') return { data: [facility] }
   if (path === `/owner/facilities/${facility.id}` || path === `/facilities/${facility.id}`) return { data: facility }

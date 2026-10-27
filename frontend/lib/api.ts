@@ -1,4 +1,5 @@
-import { invalidateReads, setReadIdentity } from './read-state'
+import { invalidateResources, setReadIdentity } from './read-state'
+import { mutationResources } from './mutation-resources'
 
 export type Role = 'CUSTOMER' | 'OWNER' | 'STAFF' | 'ADMIN'
 export type UserProfile = {
@@ -66,9 +67,12 @@ function accept(session: Session | null) {
     window.dispatchEvent(new CustomEvent('sporthub-session', { detail: session?.user ?? null }))
 }
 export async function api<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
+  const requestGeneration = authGeneration
   options.signal?.throwIfAborted()
   const method = (options.method ?? 'GET').toUpperCase()
-  const mutation = !['GET', 'HEAD'].includes(method) && !path.startsWith('/auth/')
+  const quoteRead =
+    method === 'POST' && ['/schedules/public/quote', '/bookings/quote'].includes(path.split('?')[0])
+  const mutation = !['GET', 'HEAD'].includes(method) && !path.startsWith('/auth/') && !quoteRead
   const headers = new Headers(options.headers)
   if (options.body && !(options.body instanceof FormData))
     headers.set('Content-Type', 'application/json')
@@ -82,6 +86,7 @@ export async function api<T>(path: string, options: RequestInit = {}, retry = tr
     path === '/sport-categories' ||
     path.startsWith('/schedules/public/') ||
     path.startsWith('/bookings/availability?') ||
+    path === '/bookings/quote' ||
     path.startsWith('/bookings/search?')
   if (accessToken && !publicRequest) headers.set('Authorization', `Bearer ${accessToken}`)
   let response: Response
@@ -100,16 +105,18 @@ export async function api<T>(path: string, options: RequestInit = {}, retry = tr
       throw error
     throw new ApiError(0, 'Không thể kết nối SportHub. Vui lòng thử lại.')
   }
+  if (!publicRequest && !path.startsWith('/auth/')) requireAuthGeneration(requestGeneration)
   if (response.status === 401 && retry && !path.startsWith('/auth/')) {
     await refreshSession()
     options.signal?.throwIfAborted()
     if (method === 'GET' || method === 'HEAD') return api<T>(path, options, false)
   }
   if (response.status === 204) {
-    if (mutation) invalidateReads()
+    if (mutation) invalidateResources(mutationResources(path, method))
     return undefined as T
   }
   const body = await response.json().catch(() => ({}))
+  if (!publicRequest && !path.startsWith('/auth/')) requireAuthGeneration(requestGeneration)
   if (!response.ok) {
     const rawMsg = typeof body.message === 'string' ? body.message : 'Không thể thực hiện yêu cầu.'
     // An anonymous session probe is expected on public pages; keep its known 401 off the full error chunk.
@@ -150,14 +157,42 @@ export async function api<T>(path: string, options: RequestInit = {}, retry = tr
   }
   if (!body || !Object.prototype.hasOwnProperty.call(body, 'data')) {
     if (response.status === 202) {
-      if (mutation) invalidateReads()
+      if (mutation) invalidateResources(mutationResources(path, method))
       return undefined as T
     }
     throw new ApiError(502, 'Dịch vụ trả dữ liệu không hợp lệ. Vui lòng thử lại.')
   }
-  if (mutation) invalidateReads()
+  if (mutation) invalidateResources(mutationResources(path, method))
   return (body as Envelope<T>).data
 }
+export async function privateImage(path: string, signal: AbortSignal): Promise<Blob> {
+  if (!/^\/(?:transfers\/evidence\/[^/?]+|payments\/peer-acquisitions\/[^/?]+\/qr)$/.test(path))
+    throw new Error('Đường dẫn ảnh riêng tư không hợp lệ.')
+  const generation = authGeneration
+  const response = await fetch(`/api/v1${path}`, {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    credentials: 'include',
+    cache: 'no-store',
+    signal,
+  })
+  requireAuthGeneration(generation)
+  if (!response.ok)
+    throw new ApiError(
+      response.status,
+      response.status === 401 || response.status === 403
+        ? 'Phiên đăng nhập hoặc quyền xem ảnh đã thay đổi. Vui lòng tải lại.'
+        : 'Chưa tải được ảnh. Vui lòng thử lại.',
+    )
+  if (
+    !['image/png', 'image/jpeg'].includes(response.headers.get('Content-Type')?.split(';')[0] ?? '')
+  )
+    throw new ApiError(502, 'Dịch vụ trả ảnh không hợp lệ.')
+  const blob = await response.blob()
+  requireAuthGeneration(generation)
+  if (blob.size > 5 * 1024 * 1024) throw new ApiError(502, 'Ảnh vượt giới hạn.')
+  return blob
+}
+
 export function refreshSession(): Promise<Session> {
   if (!refreshFlight) {
     const generation = authGeneration

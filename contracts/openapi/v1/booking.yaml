@@ -1661,7 +1661,7 @@
       "get": {
         "operationId": "ownerFacilityDashboard",
         "summary": "Owner facility dashboard",
-        "description": "OWNER and current facility ownership only. DEMO application facts; no SportHub revenue. R/P paidAt, F committed handoffAt, N demo paidAt, H demo refundedAt. Single inclusive facility-IANA date range, default seven dates, max 366 calendar dates (DST supported). Missing evidence is PARTIAL/UNAVAILABLE, never a complete zero. Outstanding balances use min(endExclusive,asOf). Stable effectiveAt/id order on unchanged data; GET does not mutate.",
+        "description": "Current scoped OWNER only. REAL defaults in LIVE; DEMO remains a separate read cohort. R applied court money at paidAt, native cash at bankTime, F committed handoffAt, N/H outgoing at manually recorded confirmedAt. R+F and R+F-H are facility figures; P and seller payout remain separate cashflow. One inclusive facility IANA date range, max366 dates. Partial/missing source is explicit; no network under local snapshot. Due balance cutoff=min(endExclusive,asOf). PEER_RESALE_V1 is returned in peer with its own bounded page and assurance, never included in facility R/F/P/N/H cashflow. Original LEGACY_OWNER terms are preserved.",
         "security": [
           {
             "bearerAuth": []
@@ -1715,11 +1715,33 @@
               "maximum": 100,
               "default": 25
             }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "REAL",
+                "DEMO"
+              ]
+            },
+            "description": "Server defaults REAL in LIVE; cohorts are never combined."
+          },
+          {
+            "name": "peerPage",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            },
+            "description": "Independent direct peer transaction page, using the same size/date/facility/mode."
           }
         ],
         "responses": {
           "200": {
-            "description": "Server-recorded application result. DEMO never requires a bank account or real funds.",
+            "description": "Scoped facility report with REAL/DEMO mode and evidence coverage.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1768,7 +1790,7 @@
       "get": {
         "operationId": "ownerFacilityTransactions",
         "summary": "Owner facility transactions",
-        "description": "OWNER and current facility ownership only. DEMO application facts; no SportHub revenue. R/P paidAt, F committed handoffAt, N demo paidAt, H demo refundedAt. Single inclusive facility-IANA date range, default seven dates, max 366 calendar dates (DST supported). Missing evidence is PARTIAL/UNAVAILABLE, never a complete zero. Outstanding balances use min(endExclusive,asOf). Stable effectiveAt/id order on unchanged data; GET does not mutate.",
+        "description": "Current scoped OWNER only. REAL defaults in LIVE; DEMO remains a separate read cohort. R applied court money at paidAt, native cash at bankTime, F committed handoffAt, N/H outgoing at manually recorded confirmedAt. R+F and R+F-H are facility figures; P and seller payout remain separate cashflow. One inclusive facility IANA date range, max366 dates. Partial/missing source is explicit; no network under local snapshot. Due balance cutoff=min(endExclusive,asOf).",
         "security": [
           {
             "bearerAuth": []
@@ -1822,11 +1844,23 @@
               "maximum": 100,
               "default": 25
             }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "REAL",
+                "DEMO"
+              ]
+            },
+            "description": "Server defaults REAL in LIVE; cohorts are never combined."
           }
         ],
         "responses": {
           "200": {
-            "description": "Server-recorded application result. DEMO never requires a bank account or real funds.",
+            "description": "Scoped facility report with REAL/DEMO mode and evidence coverage.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2377,7 +2411,7 @@
     "/bookings/{id}/cancellation-quote": {
       "post": {
         "operationId": "demoCancellationQuote",
-        "description": "Current Customer/group organizer may request; Owner/Staff require BOOKING_REFUND. Before play only, not during transfer lock. Five-minute server quote from original actual payments/contributions S, or latest buyer purchase P after A→B→C. H=HALF_UP(base*r/10000); largest remainder group allocations, tie paymentId. Missing legacy policy/mode requires explicit review.",
+        "description": "Eligible group organizers or facility Owner/Staff with BOOKING_REFUND may request a five-minute quote before play. Individual Customer self cancellation and every booking with a completed resale handoff are rejected (409), in REAL and DEMO; operator roles cannot restore buyer cancellation refunds. Other operational refunds use original verified facility payments/contributions and the accepted policy. No resale-price refund base.",
         "security": [
           {
             "bearerAuth": []
@@ -2444,7 +2478,7 @@
     "/bookings/{id}/cancel-with-policy": {
       "post": {
         "operationId": "demoCancelWithPolicy",
-        "description": "Atomic version/ownership/policy/expiry validation, CANCELLED and one DEMO refund entitlement. Customer requests cancellation only; facility executes money separately. Does not reverse F/N or refund original A after resale. Check-in and handoff share the court lock.",
+        "description": "Atomic court-lock validation of eligibility, booking/ownership/policy/version/expiry. Rejects new cancellation refunds after any resale handoff, including an old unconsumed quote and requests by Owner/Staff. Preserves recorded obligations and idempotent replays, unrelated group/counter refunds and technical returns. Does not change P2P handoff or paid check-in.",
         "security": [
           {
             "bearerAuth": []
@@ -2527,6 +2561,504 @@
           }
         }
       }
+    },
+    "/bookings/facility-finance/facility/{id}": {
+      "get": {
+        "operationId": "facilityFinance",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        }
+      }
+    },
+    "/bookings/facility-finance/mine": {
+      "get": {
+        "operationId": "participantFacilityFinance",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        }
+      }
+    },
+    "/bookings/facility-finance/obligations/{id}/prepare": {
+      "post": {
+        "operationId": "prepareFacilityDisbursement",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ManualDisbursement"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrepareDisbursement"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bookings/facility-finance/operations/{id}": {
+      "get": {
+        "operationId": "readFacilityDisbursement",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ManualDisbursement"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        }
+      }
+    },
+    "/bookings/facility-finance/operations/{id}/complete": {
+      "post": {
+        "operationId": "completeFacilityDisbursement",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ManualDisbursement"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualDisbursementCommand"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bookings/facility-finance/operations/{id}/review": {
+      "post": {
+        "operationId": "reviewFacilityDisbursement",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ManualDisbursement"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualReviewCommand"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bookings/facility-finance/obligations/{id}/destination": {
+      "post": {
+        "operationId": "changeFacilityObligationDestination",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DestinationChange"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bookings/admission": {
+      "get": {
+        "operationId": "getMyBookingAdmission",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Private current reservation resources of the authenticated customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AdmissionStatus"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Customer role required"
+          },
+          "503": {
+            "description": "Authority unavailable"
+          }
+        }
+      }
+    },
+    "/bookings/quote": {
+      "post": {
+        "operationId": "previewBookingInterval",
+        "summary": "Preview the current interval price and adjacent free gaps",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative price with observational short-gap advice; creates no hold",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Quote"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid interval"
+          },
+          "409": {
+            "description": "Schedule changed or interval unavailable"
+          },
+          "503": {
+            "description": "Dependency unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2564,7 +3096,7 @@
           "amount": {
             "type": "number",
             "minimum": 0,
-            "exclusiveMinimum": true,
+            "exclusiveMinimum": false,
             "nullable": true
           },
           "currency": {
@@ -2581,6 +3113,15 @@
           "ruleLabel": {
             "type": "string",
             "nullable": true
+          },
+          "pricePerHour": {
+            "type": "integer",
+            "minimum": 1,
+            "nullable": true
+          },
+          "durationMinutes": {
+            "type": "integer",
+            "minimum": 1
           }
         },
         "required": [
@@ -2631,9 +3172,68 @@
               "$ref": "#/components/schemas/Slot"
             }
           },
-          "refundPolicy": {
-            "$ref": "facility.yaml#/components/schemas/FacilityRefundPolicy",
-            "description": "Immutable terms accepted with the hold. Missing only on legacy quotes, which cannot create a new booking."
+          "quoteVersion": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ]
+          },
+          "pricingMode": {
+            "type": "string",
+            "enum": [
+              "LEGACY_SLOT",
+              "HOURLY_INTERVAL_V1"
+            ]
+          },
+          "pricingRevision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "policyVersion": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "durationMinutes": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 240
+          },
+          "quoteHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "startsAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "endsAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "code",
+                "startsAt",
+                "endsAt"
+              ]
+            }
+          },
+          "suggestions": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "$ref": "#/components/schemas/QuoteInput"
+            }
           }
         },
         "required": [
@@ -2670,6 +3270,29 @@
             "items": {
               "$ref": "#/components/schemas/Slot"
             }
+          },
+          "pricingMode": {
+            "type": "string",
+            "enum": [
+              "LEGACY_SLOT",
+              "HOURLY_INTERVAL_V1"
+            ]
+          },
+          "selectionStepMinutes": {
+            "type": "integer",
+            "nullable": true
+          },
+          "minimumMinutes": {
+            "type": "integer",
+            "nullable": true
+          },
+          "maximumMinutes": {
+            "type": "integer",
+            "nullable": true
+          },
+          "policyVersion": {
+            "type": "integer",
+            "minimum": 0
           }
         },
         "required": [
@@ -2697,6 +3320,10 @@
           },
           "expectedAmount": {
             "type": "number"
+          },
+          "quoteHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
           }
         },
         "required": [
@@ -2878,6 +3505,14 @@
           },
           "checkinTokenVersion": {
             "type": "integer"
+          },
+          "moneyClass": {
+            "type": "string",
+            "enum": [
+              "REAL",
+              "DEMO",
+              "UNKNOWN"
+            ]
           }
         },
         "required": [
@@ -2956,6 +3591,10 @@
           "checkinQrSvg": {
             "type": "string",
             "nullable": true
+          },
+          "resaleConsumed": {
+            "type": "boolean",
+            "description": "Đã dùng quyền chuyển nhượng một lần; không cho đăng lại."
           }
         },
         "required": [
@@ -2992,6 +3631,36 @@
           "memberId": {
             "type": "string",
             "format": "uuid",
+            "nullable": true
+          },
+          "moneyClass": {
+            "type": "string",
+            "enum": [
+              "REAL",
+              "DEMO",
+              "UNKNOWN"
+            ]
+          },
+          "receiverRevisionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "operatorPayment": {
+            "type": "boolean",
+            "description": "Original counter operator must retain BOOKING_CREATE_COUNTER and BOOKING_PAYMENT_COUNTER for REAL."
+          },
+          "facilityId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "receiverOwnerId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "source": {
+            "type": "string",
             "nullable": true
           }
         },
@@ -4168,6 +4837,10 @@
             "type": "string",
             "pattern": "^[a-f0-9]{64}$",
             "description": "Required for new atomic counter bookings. Review the public facility policy first; a missing/stale hash returns 409. Omission is accepted only when replaying an already-created legacy booking with its original key and payload."
+          },
+          "quoteHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
           }
         }
       },
@@ -4647,6 +5320,7 @@
           "mode": {
             "type": "string",
             "enum": [
+              "REAL",
               "DEMO"
             ]
           },
@@ -4714,6 +5388,14 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 500
+          },
+          "bankDestinations": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/BankRefundBinding"
+            },
+            "description": "REAL: positive requester/Guest allocations need a revision belonging to the actual payee; other group payers supply theirs separately."
           }
         },
         "required": [
@@ -4740,6 +5422,7 @@
           "mode": {
             "type": "string",
             "enum": [
+              "REAL",
               "DEMO"
             ]
           }
@@ -4758,61 +5441,73 @@
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact VND decimal string in the selected REAL or DEMO cohort; no SportHub revenue."
           },
           "transferFees": {
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact VND decimal string in the selected REAL or DEMO cohort; no SportHub revenue."
           },
           "operatingRevenue": {
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact VND decimal string in the selected REAL or DEMO cohort; no SportHub revenue."
           },
           "policyRefunded": {
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact VND decimal string in the selected REAL or DEMO cohort; no SportHub revenue."
           },
           "afterRefund": {
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact VND decimal string in the selected REAL or DEMO cohort; no SportHub revenue."
           },
           "transferCollected": {
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact VND decimal string in the selected REAL or DEMO cohort; no SportHub revenue."
           },
           "sellerPaid": {
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact VND decimal string in the selected REAL or DEMO cohort; no SportHub revenue."
           },
           "sellerDue": {
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact VND decimal string in the selected REAL or DEMO cohort; no SportHub revenue."
           },
           "refundDue": {
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact VND decimal string in the selected REAL or DEMO cohort; no SportHub revenue."
           },
           "technicalRefunded": {
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact VND decimal string in the selected REAL or DEMO cohort; no SportHub revenue."
+          },
+          "bankCollected": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "REAL native cash once per verified credit at bankTime; includes applied and unapplied money."
+          },
+          "unappliedCollected": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
+            "readOnly": true,
+            "description": "Part of native cash not applied as of obligationCutoff; includes extra, partial, expired and failed application money."
           }
         },
         "required": [
@@ -4825,7 +5520,9 @@
           "sellerPaid",
           "sellerDue",
           "refundDue",
-          "technicalRefunded"
+          "technicalRefunded",
+          "bankCollected",
+          "unappliedCollected"
         ],
         "description": "R courtCollected, F transferFees, H successful policyRefunded. operatingRevenue=R+F; afterRefund=R+F-H. P transferCollected and N sellerPaid are separate cashflow. Technical refunds are separate from H. Due balances include older liabilities before obligationCutoff."
       },
@@ -4842,13 +5539,13 @@
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact scheduled/used minutes decimal string."
           },
           "usedMinutes": {
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact scheduled/used minutes decimal string."
           },
           "cancelledCount": {
             "type": "integer"
@@ -4890,13 +5587,13 @@
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact scheduled/used minutes decimal string."
           },
           "usedMinutes": {
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact scheduled/used minutes decimal string."
           },
           "cancelledCount": {
             "type": "integer"
@@ -4931,19 +5628,19 @@
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact VND decimal string in the selected REAL or DEMO cohort; no SportHub revenue."
           },
           "transferFees": {
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact VND decimal string in the selected REAL or DEMO cohort; no SportHub revenue."
           },
           "policyRefunded": {
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact VND decimal string in the selected REAL or DEMO cohort; no SportHub revenue."
           }
         },
         "required": [
@@ -4967,7 +5664,8 @@
               "FACILITY_TRANSFER_FEE",
               "SELLER_PAYOUT",
               "POLICY_REFUND",
-              "TECHNICAL_REFUND"
+              "TECHNICAL_REFUND",
+              "BANK_CREDIT"
             ]
           },
           "direction": {
@@ -5008,14 +5706,15 @@
             "type": "string",
             "enum": [
               "SUCCESS",
-              "FAILED"
+              "FAILED",
+              "BANK_VERIFIED"
             ]
           },
           "amount": {
             "type": "string",
             "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$",
             "readOnly": true,
-            "description": "Exact VND decimal string. DEMO application amount; no real transfer of funds."
+            "description": "Exact VND decimal string in the selected REAL or DEMO cohort; no SportHub revenue."
           },
           "currency": {
             "type": "string",
@@ -5026,6 +5725,32 @@
           "effectiveAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "moneyClass": {
+            "type": "string",
+            "enum": [
+              "REAL",
+              "DEMO"
+            ]
+          },
+          "confirmationMethod": {
+            "type": "string",
+            "enum": [
+              "BANK_VERIFIED",
+              "MANUALLY_RECORDED",
+              "HANDOFF_COMMITTED",
+              "SIMULATED"
+            ]
+          },
+          "dateBasis": {
+            "type": "string",
+            "enum": [
+              "bankTime",
+              "paidAt",
+              "confirmedAt",
+              "handoffAt",
+              "demoExecutionAt"
+            ]
           }
         },
         "required": [
@@ -5043,7 +5768,10 @@
           "state",
           "amount",
           "currency",
-          "effectiveAt"
+          "effectiveAt",
+          "moneyClass",
+          "confirmationMethod",
+          "dateBasis"
         ]
       },
       "DemoReportPage": {
@@ -5101,6 +5829,7 @@
           "mode": {
             "type": "string",
             "enum": [
+              "REAL",
               "DEMO"
             ]
           },
@@ -5144,6 +5873,9 @@
           },
           "transactions": {
             "$ref": "#/components/schemas/DemoReportPage"
+          },
+          "peer": {
+            "$ref": "#/components/schemas/PeerFacilityReport"
           }
         },
         "required": [
@@ -5159,8 +5891,577 @@
           "summary",
           "daily",
           "courts",
-          "transactions"
+          "transactions",
+          "peer"
         ]
+      },
+      "ManualDisbursementCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "bankTransactionReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          }
+        },
+        "required": [
+          "version",
+          "bankTransactionReference"
+        ]
+      },
+      "ManualReviewCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "REVIEW",
+              "TAKE_OVER",
+              "RELEASE"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "confirmedNotTransferred": {
+            "type": "boolean",
+            "description": "Required true for RELEASE after checking the bank; never implied by timeout."
+          }
+        },
+        "required": [
+          "version",
+          "action",
+          "reason"
+        ]
+      },
+      "ManualDisbursement": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "obligationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "PREPARED",
+              "REVIEW",
+              "MANUALLY_RECORDED",
+              "RELEASED"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "SELLER_PAYOUT",
+              "POLICY_REFUND",
+              "TECHNICAL_REFUND"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "destinationRevisionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bankBin": {
+            "type": "string"
+          },
+          "accountNumber": {
+            "type": "string"
+          },
+          "accountName": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 25,
+            "pattern": "^[A-Z0-9 ]{1,25}$"
+          },
+          "claimedBy": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "confirmationMethod": {
+            "type": "string",
+            "enum": [
+              "MANUALLY_RECORDED"
+            ]
+          },
+          "bankTransactionReference": {
+            "type": "string"
+          },
+          "confirmedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "operationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "obligationVersion": {
+            "type": "integer"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "REAL"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "warning": {
+            "type": "string"
+          },
+          "bankName": {
+            "type": "string"
+          },
+          "qrPayload": {
+            "type": "string"
+          },
+          "qrImageDataUrl": {
+            "type": "string",
+            "description": "Private locally encoded PNG data URL. No external Generate API or account URL."
+          },
+          "receiptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "confirmationLabel": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "obligationId",
+          "version",
+          "state",
+          "kind",
+          "amount",
+          "destinationRevisionId",
+          "claimedBy",
+          "operationId",
+          "obligationVersion",
+          "mode",
+          "createdAt"
+        ],
+        "description": "Only current claimed operator sees private bank/QR fields while PREPARED. REVIEW/released/recorded responses hide QR. Successful immutable outgoing receipt is MANUALLY_RECORDED, never BANK_VERIFIED."
+      },
+      "PrepareDisbursement": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
+      "RefundDestinationCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "destinationRevisionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "consentReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "version",
+          "destinationRevisionId",
+          "consentReference"
+        ]
+      },
+      "BankRefundBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "paymentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "destinationRevisionId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "paymentId",
+          "destinationRevisionId"
+        ]
+      },
+      "DestinationChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "destinationRevisionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "consentReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "version",
+          "destinationRevisionId",
+          "consentReference",
+          "reason"
+        ]
+      },
+      "QuoteInput": {
+        "type": "object",
+        "properties": {
+          "courtId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "courtId",
+          "startsAt",
+          "endsAt"
+        ]
+      },
+      "AdmissionStatus": {
+        "type": "object",
+        "required": [
+          "policyVersion",
+          "maxConcurrent",
+          "resources",
+          "policyAvailability",
+          "marketPermanent",
+          "strikeCount",
+          "holdBlockedUntil",
+          "onlineBlockedUntil",
+          "marketBlockedUntil"
+        ],
+        "properties": {
+          "policyVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "maxConcurrent": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "resources": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/AdmissionResource"
+            }
+          },
+          "policyAvailability": {
+            "type": "string",
+            "enum": [
+              "COMPLETE",
+              "UNAVAILABLE",
+              "NOT_ENABLED"
+            ]
+          },
+          "marketPermanent": {
+            "type": "boolean"
+          },
+          "strikeCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "holdBlockedUntil": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "onlineBlockedUntil": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "marketBlockedUntil": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "description": "Private current-user policy/restrictions and active claim references; UNKNOWN cache coverage never grants new admission. Existing paid bookings and cases remain accessible under a restriction."
+      },
+      "AdmissionResource": {
+        "type": "object",
+        "required": [
+          "kind",
+          "resourceId",
+          "expiresAt"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "ONLINE_BOOKING",
+              "PEER_ACQUISITION",
+              "LEGACY_ACQUISITION",
+              "CLAIM_REQUIRES_RECONCILIATION"
+            ]
+          },
+          "resourceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "PeerReportRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "acquisitionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bookingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courtId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "payerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recipientId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "PEER_RESALE_V1"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d+)?$"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "confirmationMethod": {
+            "type": "string",
+            "enum": [
+              "NONE",
+              "BUYER_DECLARED",
+              "COUNTERPARTY_ACKNOWLEDGED",
+              "OWNER_ADJUDICATED"
+            ]
+          },
+          "usageDecision": {
+            "type": "string",
+            "nullable": true
+          },
+          "moneyState": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "declaredAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "acquisitionId",
+          "bookingId",
+          "courtId",
+          "payerId",
+          "recipientId",
+          "protocol",
+          "amount",
+          "phase",
+          "confirmationMethod",
+          "usageDecision",
+          "moneyState",
+          "createdAt",
+          "declaredAt",
+          "decidedAt"
+        ]
+      },
+      "PeerReportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/PeerReportRow"
+            }
+          }
+        },
+        "required": [
+          "page",
+          "size",
+          "total",
+          "totalPages",
+          "items"
+        ]
+      },
+      "PeerFacilityReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "availability": {
+            "type": "string",
+            "enum": [
+              "COMPLETE",
+              "PARTIAL",
+              "UNAVAILABLE",
+              "NOT_APPLICABLE"
+            ]
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dateBasis": {
+            "type": "string"
+          },
+          "openUsageCases": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "openMoneyCases": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "buyerDeclaredAmount": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d+)?$"
+          },
+          "sellerAcknowledgedAmount": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d+)?$"
+          },
+          "ownerAwardedAmount": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d+)?$"
+          },
+          "returnDeclaredAmount": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d+)?$"
+          },
+          "returnAcknowledgedAmount": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d+)?$"
+          },
+          "transactions": {
+            "$ref": "#/components/schemas/PeerReportPage"
+          }
+        },
+        "required": [
+          "availability",
+          "reasons",
+          "dateBasis",
+          "openUsageCases",
+          "openMoneyCases",
+          "buyerDeclaredAmount",
+          "sellerAcknowledgedAmount",
+          "ownerAwardedAmount",
+          "returnDeclaredAmount",
+          "returnAcknowledgedAmount",
+          "transactions"
+        ],
+        "description": "Informational direct B-to-A consideration and A-to-B returns; never facility revenue, bank receipts, transfer fee or Owner seller payable. Owner adjudicates usage only. Exact amount strings; current open cases created before cutoff include pre-period cases."
       }
     }
   },

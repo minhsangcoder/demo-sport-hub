@@ -1,6 +1,6 @@
 # SportHub — Nền Tảng Đặt Sân Thể Thao Trực Tuyến
 
-Hệ thống đặt sân thể thao đa cơ sở (Sport Court Booking System) xây dựng theo kiến trúc Microservices (Spring Boot 3, PostgreSQL, Redis, RabbitMQ, MinIO) kết hợp giao diện Web hiện đại (Next.js 15, TailwindCSS, TypeScript).
+Hệ thống đặt sân thể thao đa cơ sở (Sport Court Booking System) xây dựng theo kiến trúc Microservices (Spring Boot 3, PostgreSQL, Redis, RabbitMQ, MinIO) kết hợp giao diện Web hiện đại (Next.js 16, TailwindCSS, TypeScript).
 
 ---
 
@@ -32,21 +32,35 @@ pwsh scripts/seed-accounts.ps1
 
 #### Khởi động Backend Services:
 ```powershell
-pwsh scripts/demo/start.ps1
+pwsh scripts/demo/start.ps1 -Rebuild
 ```
-*(Script sẽ tự động build và chạy: `identity-service`, `facility-service`, `schedule-service`, `booking-service`, `payment-service`, `transfer-service` và `api-gateway` tại `http://localhost:18080`).*
+Script dừng các JAR của đúng dự án, build lại toàn bộ backend rồi chạy các dịch vụ tại `http://localhost:18080`. Cần Java 21 và Maven trong `PATH`. Các bài kiểm thử được chạy riêng; `-Rebuild` chỉ đóng gói bản chạy. Không xóa dữ liệu; Flyway áp dụng migration bổ sung khi khởi động. Sao lưu database trước khi nâng bản có migration. Những lần sau chưa sửa source, dùng `pwsh scripts/demo/start.ps1`; script sẽ báo nếu JAR cũ hơn source hoặc tiến trình đang chạy chưa nạp JAR mới.
 
 #### Khởi động Frontend:
 ```powershell
-cd frontend
-pnpm install
-pnpm dev -p 3001
+pnpm --dir frontend install
+pwsh scripts/demo/start-frontend.ps1 -Rebuild
 ```
 Mở trình duyệt truy cập: **[http://localhost:3001](http://localhost:3001)** hoặc trang đăng nhập **[http://localhost:3001/login](http://localhost:3001/login)**.
+
+Script dừng bản standalone cũ của đúng dự án, build bằng webpack và chạy output standalone cùng ảnh/static đúng cấu hình Next.js hiện tại. Nếu đang dùng `pnpm dev`, dừng bằng `Ctrl+C` trước. Lần sau chưa sửa source, dùng `pwsh scripts/demo/start-frontend.ps1`. Dùng `pnpm --dir frontend dev -p 3001` khi lập trình và cần tự tải lại source; bản production tránh thời gian biên dịch trang trong lúc demo. Chỉ cần `pnpm install` lần đầu hoặc khi lockfile thay đổi. Không chạy lại lệnh seed khi chỉ nâng phiên bản ứng dụng.
 
 ---
 
 ## 👥 Danh Sách Tài Khoản Test (Tất Cả Các Role)
+
+### Chức năng mới và cấu hình môi trường
+
+Proposal hiện hành được chỉ định tại `openspec/CURRENT_CHANGE.md`; không ghép yêu cầu từ các change cũ.
+
+- Chat mở 50 tin mới nhất; nút tải tin cũ dùng phân trang riêng. Polling chỉ đọc tin mới.
+- Worker hết hạn lọc phiên cần xử lý trước giới hạn 100; tranh chấp có người đến đúng giờ được giữ đến hạn nghiệp vụ.
+- `SPORTHUB_HOLD_PROTECTION_ENABLED=true` bật cooldown/anti-regrab; cần Redis hoạt động. Quota một lượt giữ vẫn được kiểm tra ở Booking.
+- `SPORTHUB_BANK_PROFILE_ENFORCEMENT=true` bật khóa đổi ngân hàng theo booking/nghĩa vụ. Khai lần đầu vẫn được phép; cần `PAYMENT_SECRET_KEYS` tại backend để lưu ngân hàng mã hóa. Giữ nguyên khóa qua các lần khởi động, không đưa vào Git hoặc frontend.
+- REAL/P2P chỉ bật sau khi Owner có kênh payOS hợp lệ, chính sách hoàn, địa chỉ webhook HTTPS và cấu hình `SPORTHUB_MONEY_MODE=REAL`, `PAYOS_COLLECTION_CREATE_ENABLED=true`, `SPORTHUB_PEER_RESALE_FACILITIES=<UUID cơ sở đã sẵn sàng>`. Chỉ danh sách cơ sở được chọn mới nhận P2P; không dùng booking DEMO làm chứng từ thu thật.
+- Giờ đặt tự chọn cần Owner công bố đủ bảng giá HOURLY và bật chính sách giờ tự chọn tại cơ sở. Không tự chuyển đổi đơn giá của dữ liệu cũ.
+
+Sau khi sửa source hoặc cấu hình, chạy lại `pwsh scripts/demo/start.ps1 -Rebuild` và `pwsh scripts/demo/start-frontend.ps1 -Rebuild`. Không seed lại database để cập nhật ứng dụng.
 
 > **Mật khẩu dùng chung cho tất cả tài khoản bên dưới:**  
 > 🔑 **`SportHub123@`**

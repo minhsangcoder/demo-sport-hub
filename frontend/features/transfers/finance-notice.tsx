@@ -1,7 +1,28 @@
 import { demoVnd } from '@/features/facility/demo-report'
 import type { TransferFinanceTerms } from './types'
 export function TransferFinanceNotice({ terms }: { terms: TransferFinanceTerms }) {
-  if (terms.mode !== 'DEMO')
+  if (terms.protocol === 'PEER_RESALE_V1')
+    return (
+      <section className="my-5 space-y-3 rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-sm">
+        <h2 className="font-bold">Chuyển nhượng trực tiếp giữa hai khách</h2>
+        <p>
+          Người mua trả <strong>{demoVnd(terms.amount)}</strong> trực tiếp vào tài khoản người bán
+          đã chốt. Không có phí chuyển nhượng hoặc khoản cơ sở trả người bán.
+        </p>
+        <p>
+          Người mua gửi ảnh và mã giao dịch; người bán xác nhận đã nhận đủ tiền thì hệ thống bàn
+          giao quyền sân. Ảnh, mã QR và xác nhận hai bên không phải xác minh giao dịch từ ngân hàng.
+        </p>
+        <p>
+          Chủ cơ sở chỉ phân xử quyền dùng sân khi tranh chấp, không hoàn khoản tiền P2P. Sau khi
+          nhận quyền, người mua không được chuyển nhượng tiếp.
+        </p>
+        <p>
+          Lượt đặt nhận qua chuyển nhượng không áp dụng hoàn tiền khi tự hủy.
+        </p>
+      </section>
+    )
+  if (terms.mode !== 'DEMO' && terms.mode !== 'REAL')
     return (
       <p className="my-5 rounded-xl bg-amber-50 p-4 text-sm text-amber-900">
         Giao dịch dùng điều khoản cũ. Cần kiểm tra và chấp nhận điều khoản mô phỏng của cơ sở trước
@@ -10,10 +31,15 @@ export function TransferFinanceNotice({ terms }: { terms: TransferFinanceTerms }
     )
   return (
     <section className="my-5 space-y-3 rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-sm">
-      <h2 className="font-bold">Điều khoản chuyển nhượng mô phỏng</h2>
+      <h2 className="font-bold">
+        Điều khoản chuyển nhượng{terms.mode === 'DEMO' ? ' mô phỏng' : ''}
+      </h2>
       <p>
         Bên nhận thanh toán:{' '}
-        <strong>{terms.receiverName || 'Cơ sở của sân được chuyển nhượng'}</strong>.
+        <strong>
+          {terms.facilityName || terms.receiverName || 'Cơ sở của sân được chuyển nhượng'}
+        </strong>
+        .
       </p>
       <dl className="grid grid-cols-2 gap-3">
         <dt>Người mua thanh toán</dt>
@@ -22,20 +48,20 @@ export function TransferFinanceNotice({ terms }: { terms: TransferFinanceTerms }
         <dd className="text-right">{demoVnd(terms.quotedFeeAmount)}</dd>
         <dt>Cơ sở phải trả người bán</dt>
         <dd className="text-right font-semibold">{demoVnd(terms.quotedSellerNetAmount)}</dd>
-        <dt>Hoàn khi hủy hợp lệ</dt>
-        <dd className="text-right font-semibold text-emerald-700">
-          {(terms.refundPolicy.rateBps / 100).toLocaleString('vi-VN')}% giá mua lại
-        </dd>
       </dl>
       <p>
-        Người mua nhận quyền sau thanh toán mô phỏng thành công và bàn giao, sử dụng theo lịch;
-        không phải chờ cơ sở trả người bán.
+        Người mua nhận quyền sau{' '}
+        {terms.mode === 'REAL'
+          ? 'khi xác minh đủ tiền vào cơ sở'
+          : 'thanh toán mô phỏng thành công'}{' '}
+        và bàn giao, sử dụng theo lịch; không phải chờ cơ sở trả người bán.
       </p>
       <p className="text-xs text-slate-600">
-        Nếu người mua lại hủy hợp lệ trước giờ chơi, chủ cơ sở hoặc nhân viên được cấp quyền sẽ hoàn
-        tiền cho người mua lại theo tỷ lệ{' '}
-        {(terms.refundPolicy.rateBps / 100).toLocaleString('vi-VN')}% trên giá đã mua lại. Phí thuộc
-        cơ sở; SportHub không hưởng phí. Không phát sinh giao dịch tiền thật.
+        Lượt đặt nhận qua chuyển nhượng không áp dụng hoàn tiền khi tự hủy. Phí thuộc
+        cơ sở; SportHub không hưởng phí.{' '}
+        {terms.mode === 'DEMO'
+          ? 'Không phát sinh giao dịch tiền thật.'
+          : 'Cơ sở thực hiện trả/hoàn qua ngân hàng và xác nhận mã giao dịch.'}
       </p>
     </section>
   )

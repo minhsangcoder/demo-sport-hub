@@ -48,33 +48,91 @@ public class BookingAvailabilityService {
       configuration.lockReservationFacility(facility);
       preview = (ObjectNode) dependencies.preview(court, day.toString()).deepCopy();
     }
+    return overlay(facility, Map.of(court, day), Map.of(court, preview)).get(court);
+  }
+
+  public record Batch(Map<UUID, JsonNode> previews, RuntimeException error) {}
+
+  public Batch discovery(UUID facility, Map<UUID, LocalDate> courts) {
+    if (courts.isEmpty()) return new Batch(Map.of(), null);
+    configuration.lockReservationFacility(facility);
+    var previews = new LinkedHashMap<UUID, ObjectNode>();
+    var dates = new LinkedHashMap<UUID, LocalDate>();
+    RuntimeException error = null;
+    for (var entry : courts.entrySet()) {
+      try {
+        var preview =
+            (ObjectNode)
+                dependencies.preview(entry.getKey(), entry.getValue().toString()).deepCopy();
+        if (preview.hasNonNull("facilityId")
+            && !facility.toString().equals(preview.path("facilityId").asText()))
+          throw new com.sporthub.common.exception.ResourceNotFoundException(
+              "Court facility changed during search");
+        previews.put(entry.getKey(), preview);
+        dates.put(entry.getKey(), entry.getValue());
+      } catch (RuntimeException failure) {
+        error = failure;
+        break;
+      }
+    }
+    return new Batch(overlay(facility, dates, previews), error);
+  }
+
+  private Map<UUID, JsonNode> overlay(
+      UUID facility, Map<UUID, LocalDate> days, Map<UUID, ObjectNode> previews) {
+    if (previews.isEmpty()) return Map.of();
     Instant observed = clock.instant(), horizon = observed.plusSeconds(advanceDays * 86400L);
-    var zone = ZoneId.of(preview.path("timezone").asText("Asia/Ho_Chi_Minh"));
-    LocalDate today = observed.atZone(zone).toLocalDate();
-    if (day.isBefore(today) || day.isAfter(horizon.atZone(zone).toLocalDate()))
-      throw new IllegalArgumentException("Choose a date inside the booking window");
+    Instant from = Instant.MAX, to = Instant.MIN;
+    for (var entry : previews.entrySet()) {
+      var preview = entry.getValue();
+      var day = days.get(entry.getKey());
+      var zone = ZoneId.of(preview.path("timezone").asText("Asia/Ho_Chi_Minh"));
+      LocalDate today = observed.atZone(zone).toLocalDate();
+      if (day.isBefore(today) || day.isAfter(horizon.atZone(zone).toLocalDate()))
+        throw new IllegalArgumentException("Choose a date inside the booking window");
+      var window = reservationWindow(preview, day, zone);
+      if (window.from().isBefore(from)) from = window.from();
+      if (window.to().isAfter(to)) to = window.to();
+    }
     boolean updating =
         facility != null
             && repo.jdbc()
-                    .queryForObject(
-                        "SELECT count(*) FROM configuration_change_guards WHERE facility_id=? AND"
-                            + " state='PREPARED'",
-                        Integer.class,
-                        facility)
-                > 0;
-    var range = reservationWindow(preview, day, zone);
+                .queryForObject(
+                    "SELECT EXISTS(SELECT 1 FROM configuration_change_guards WHERE facility_id=?"
+                        + " AND state='PREPARED')",
+                    Boolean.class,
+                    facility);
     var rows =
         repo.jdbc()
             .queryForList(
-                "SELECT starts_at,ends_at,state FROM slot_reservations WHERE court_id=?"
-                    + " AND state IN('BOOKED','HOLD')"
-                    + " AND tstzrange(starts_at,ends_at,'[)')"
-                    + " && tstzrange(?::timestamptz,?::timestamptz,'[)')"
-                    + " AND (state='BOOKED' OR expires_at>?)",
-                court,
-                Timestamp.from(range.from()),
-                Timestamp.from(range.to()),
+                "SELECT court_id,starts_at,ends_at,state FROM slot_reservations WHERE"
+                    + " court_id=ANY(?) AND state IN('BOOKED','HOLD') AND"
+                    + " tstzrange(starts_at,ends_at,'[)') &&"
+                    + " tstzrange(?::timestamptz,?::timestamptz,'[)') AND (state='BOOKED' OR"
+                    + " expires_at>?)",
+                BookingRepository.uuidArray(previews.keySet()),
+                Timestamp.from(from),
+                Timestamp.from(to),
                 Timestamp.from(observed));
+    var byCourt = new HashMap<UUID, List<Map<String, Object>>>();
+    for (var row : rows)
+      byCourt.computeIfAbsent((UUID) row.get("court_id"), id -> new ArrayList<>()).add(row);
+    var result = new LinkedHashMap<UUID, JsonNode>();
+    for (var entry : previews.entrySet()) {
+      var preview = entry.getValue();
+      annotate(
+          preview, byCourt.getOrDefault(entry.getKey(), List.of()), observed, horizon, updating);
+      result.put(entry.getKey(), preview);
+    }
+    return Collections.unmodifiableMap(result);
+  }
+
+  private void annotate(
+      ObjectNode preview,
+      List<Map<String, Object>> rows,
+      Instant observed,
+      Instant horizon,
+      boolean updating) {
     for (var slot : preview.withArray("slots"))
       if (slot.path("state").asText().equals("ELIGIBLE")) {
         Instant start = Instant.parse(slot.path("startsAt").asText()),
@@ -97,7 +155,6 @@ public class BookingAvailabilityService {
         .put("observedAt", observed.toString())
         .put("configurationUpdating", updating)
         .put("bookingWindowEndsAt", horizon.toString());
-    return preview;
   }
 
   private record ReservationWindow(Instant from, Instant to) {}

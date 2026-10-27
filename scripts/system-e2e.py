@@ -6,6 +6,7 @@ processes and containers are stopped. See docs/final-system-verification.md.
 """
 import base64
 import json
+import http.server
 import shutil
 import os
 import re
@@ -31,12 +32,20 @@ PG_PASSWORD = os.environ.get('SPORTHUB_E2E_PG_PASSWORD', 'phase01_synthetic_only
 REDIS = os.environ.get('SPORTHUB_E2E_REDIS_CONTAINER', 'sporthub-phase01-redis')
 REDIS_PORT = os.environ.get('SPORTHUB_E2E_REDIS_PORT', '52386')
 JAVA = os.environ.get('SPORTHUB_E2E_JAVA', 'C:/Program Files/Java/jdk-21.0.10/bin/java.exe')
+JAVA_HEAP_MB = int(os.environ.get('SPORTHUB_E2E_JAVA_HEAP_MB', '256'))
+if not 128 <= JAVA_HEAP_MB <= 512:
+    raise ValueError('Isolated service heap must be between 128 and 512 MiB')
 NODE = os.environ['SPORTHUB_E2E_NODE']
 TEST_SCRIPT = os.environ.get('SPORTHUB_E2E_TEST_SCRIPT', 'system-e2e.mjs')
-if TEST_SCRIPT not in ['system-e2e.mjs', 'counter-booking-ownership-e2e.mjs', 'demo-finance-e2e.mjs']:
+if TEST_SCRIPT not in ['system-e2e.mjs', 'counter-booking-ownership-e2e.mjs', 'demo-finance-e2e.mjs', 'real-payments-e2e.mjs', 'peer-resale-system-e2e.mjs']:
     raise RuntimeError('Choose a checked-in system test harness')
+if TEST_SCRIPT == 'real-payments-e2e.mjs':
+    TEST_SCRIPT = 'peer-resale-system-e2e.mjs'
+    os.environ['SPORTHUB_E2E_TEST_SCRIPT'] = TEST_SCRIPT
 OWNERSHIP_TEST = TEST_SCRIPT == 'counter-booking-ownership-e2e.mjs'
 DEMO_FINANCE_TEST = TEST_SCRIPT == 'demo-finance-e2e.mjs'
+PEER_RESALE_TEST = TEST_SCRIPT == 'peer-resale-system-e2e.mjs'
+REAL_PAYMENTS_TEST = TEST_SCRIPT == 'real-payments-e2e.mjs' or PEER_RESALE_TEST
 ARTIFACT_ROOT = Path(os.environ.get('SPORTHUB_E2E_ARTIFACT_ROOT', str(ROOT / 'backend'))).resolve()
 FRONTEND_ROOT = Path(os.environ.get('SPORTHUB_E2E_FRONTEND_ROOT', str(ROOT / 'frontend'))).resolve()
 ARTIFACT_SUFFIX = os.environ.get('SPORTHUB_E2E_ARTIFACT_SUFFIX', '')
@@ -114,7 +123,7 @@ class SMTP(socketserver.StreamRequestHandler):
             text = line.decode().strip()
             if text.upper().startswith('RCPT TO'):
                 recipient = re.search(r'<([^>]+)>', text).group(1)
-                synthetic_sms = (OWNERSHIP_TEST or DEMO_FINANCE_TEST) and re.fullmatch(r'849[0-9]{8}@sms\.sporthub\.local', recipient)
+                synthetic_sms = (OWNERSHIP_TEST or DEMO_FINANCE_TEST or REAL_PAYMENTS_TEST) and re.fullmatch(r'849[0-9]{8}@sms\.sporthub\.local', recipient)
                 if not recipient.endswith('@phase12.invalid') and not synthetic_sms:
                     self.wfile.write(b'550 Test recipients only\r\n')
                     continue
@@ -151,6 +160,7 @@ def main():
     threading.Thread(target=smtp.serve_forever, daemon=True).start()
     ports = {name: free_port() for name in SERVICES + ['gateway', 'frontend', 'rabbit', 'minio']}
     dbs = {name: name + '_system_phase12_' + RUN for name in SERVICES}
+    control = None
     try:
         for name in SERVICES:
             command(['docker', 'exec', PG, 'createdb', '-U', PG_USER, dbs[name]])
@@ -199,7 +209,7 @@ def main():
                     'SPRING_MAIL_HOST':'127.0.0.1', 'SPRING_MAIL_PORT':str(smtp.server_address[1]),
                     'SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH':'false', 'SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE':'false',
                     'FRONTEND_BASE_URL':f'http://127.0.0.1:{ports["frontend"]}', 'APP_PUBLIC_URL':f'http://127.0.0.1:{ports["frontend"]}',
-                    'SECURE_COOKIE':'false', 'DEMO_SMS_ENABLED':'true' if OWNERSHIP_TEST or DEMO_FINANCE_TEST else 'false', 'GROUP_MIN_LEAD_SECONDS':'180',
+                    'SECURE_COOKIE':'false', 'DEMO_SMS_ENABLED':'true' if OWNERSHIP_TEST or DEMO_FINANCE_TEST or REAL_PAYMENTS_TEST else 'false', 'GROUP_MIN_LEAD_SECONDS':'180',
                     'GROUP_PAYMENT_DEADLINE_SECONDS':'180', 'SPORTHUB_EVENTS_OUTBOX_DELAY_MS':'300',
                     'DEMO_PAYMENT_CALLBACK_SECRET':'phase12-demo-callback-secret-over-thirty-two-characters',
                     'CORS_ALLOWED_ORIGIN':f'http://127.0.0.1:{ports["frontend"]}',
@@ -207,16 +217,37 @@ def main():
         if DEMO_FINANCE_TEST:
             env['TRANSFER_ACQUISITION_SECONDS'] = '45'
             env['TRANSFER_FINANCE_ENABLED'] = 'true'
+        if REAL_PAYMENTS_TEST:
+            env.update({'SPORTHUB_MONEY_MODE':'REAL', 'PAYOS_COLLECTION_CREATE_ENABLED':'true',
+                        'PAYMENT_TEST_PROVIDER_ALLOWED':'true',
+                        'PAYMENT_SECRET_KEYS':'synthetic:'+base64.b64encode(os.urandom(32)).decode(),
+                        'PAYMENT_WEBHOOK_ORIGIN':f'http://127.0.0.1:{ports["gateway"]}',
+                        'JWT_ACCESS_TOKEN_EXPIRATION':'600000', 'TRANSFER_ACQUISITION_SECONDS':'90'})
+        if PEER_RESALE_TEST:
+            control_token = uuid.uuid4().hex
+            if not (ARTIFACT_ROOT/'.peer-fixture-clock').is_file():
+                raise RuntimeError('Peer integration requires the checked-in test clock overlay in isolated artifacts')
+            env.update({'SPORTHUB_PEER_RESALE_FACILITIES':'*', 'SPORTHUB_HOLD_PROTECTION_ENABLED':'true',
+                        'SPORTHUB_BANK_PROFILE_ENFORCEMENT':'true',
+                        'MINIO_ENDPOINT':f'http://127.0.0.1:{ports["minio"]}',
+                        'MINIO_ACCESS_KEY':'phase12_test', 'MINIO_SECRET_KEY':'phase12_synthetic_only',
+                        'MINIO_PEER_EVIDENCE_BUCKET':'phase12-peer-evidence',
+                        'SEPAY_QR_IMAGE_URL':env['PAYOS_API_URL']+'/sepay',
+                        'JWT_ACCESS_TOKEN_EXPIRATION':'1800000'})
         for name in SERVICES:
             env[name.upper() + '_SERVICE_URL'] = f'http://127.0.0.1:{ports[name]}'
-        running = {}
+        running, launches = {}, {}
         for name in SERVICES + ['gateway']:
             module = 'api-gateway' if name == 'gateway' else name + '-service'
             child = dict(env, SERVER_PORT=str(ports[name]), SPORTHUB_EVENTS_OUTBOX_ENABLED='true' if name in ['facility','booking','payment','transfer'] else 'false')
-            child['SPRING_PROFILES_ACTIVE'] = 'local' if name == 'payment' else 'default'
+            child['SPRING_PROFILES_ACTIVE'] = 'local' if name == 'payment' and not REAL_PAYMENTS_TEST else 'default'
+            if PEER_RESALE_TEST and name in ['booking','schedule','payment','transfer']:
+                child.update(SPORTHUB_E2E_CLOCK_ENABLED='true', SPORTHUB_E2E_CLOCK_TOKEN=control_token)
             if name != 'gateway':
                 child['SPRING_DATASOURCE_URL'] = f'jdbc:postgresql://127.0.0.1:{PG_PORT}/{dbs[name]}'
-            running[name] = spawn([JAVA, '-Xmx256m', '-jar', str(ARTIFACT_ROOT / module / 'target' / (module+'-0.0.1-SNAPSHOT'+ARTIFACT_SUFFIX+'.jar'))], child, name)
+            args = [JAVA, f'-Xmx{JAVA_HEAP_MB}m', '-jar', str(ARTIFACT_ROOT / module / 'target' / (module+'-0.0.1-SNAPSHOT'+ARTIFACT_SUFFIX+'.jar'))]
+            launches[name] = (args, child)
+            running[name] = spawn(args, child, name)
         for name, process in running.items():
             wait_url(f'http://127.0.0.1:{ports[name]}/actuator/health/liveness', process)
             print('Ready:', name, flush=True)
@@ -231,7 +262,76 @@ def main():
         shutil.copytree(FRONTEND_ROOT/'public',runtime/'public',dirs_exist_ok=True)
         frontend = spawn([NODE, str(runtime/'server.js')], frontend_env, 'frontend-runtime')
         wait_url(f'http://127.0.0.1:{ports["frontend"]}', frontend)
-        config = {'run':RUN, 'ports':ports, 'databases':dbs, 'pg':PG, 'pgUser':PG_USER, 'output':str(OUT), 'baseURL':f'http://127.0.0.1:{ports["frontend"]}', 'pids':[p.pid for p in processes], 'containers':containers}
+        config = {'run':RUN, 'ports':ports, 'databases':dbs, 'pg':PG, 'pgUser':PG_USER, 'output':str(OUT), 'baseURL':f'http://127.0.0.1:{ports["frontend"]}', 'pids':[p.pid for p in processes], 'containers':containers, 'payosMockURL':env.get('PAYOS_API_URL') if REAL_PAYMENTS_TEST else None}
+        config['performanceOnly'] = os.environ.get('SPORTHUB_E2E_PERFORMANCE_ONLY') == 'true'
+        config['javaHeapMb'] = JAVA_HEAP_MB
+        config['demoCompatibility'] = DEMO_FINANCE_TEST and os.environ.get('SPORTHUB_E2E_DEMO_COMPATIBILITY') == 'true'
+        comparison_root = os.environ.get('SPORTHUB_E2E_COMPARISON_FRONTEND_ROOT')
+        if PEER_RESALE_TEST and comparison_root:
+            comparison = Path(comparison_root).resolve()
+            previous = [entry for entry in (comparison/'.next/standalone').rglob('server.js')
+                        if 'node_modules' not in entry.relative_to(comparison/'.next/standalone').parts]
+            if len(previous) != 1:
+                raise RuntimeError('Expected one preserved production comparison application')
+            comparison_runtime = previous[0].parent
+            shutil.copytree(comparison/'.next/static',comparison_runtime/'.next/static',dirs_exist_ok=True)
+            shutil.copytree(comparison/'public',comparison_runtime/'public',dirs_exist_ok=True)
+            comparison_port = free_port()
+            previous_process = spawn([NODE,str(previous[0])],dict(frontend_env,PORT=str(comparison_port)),'frontend-comparison')
+            config['comparisonBaseURL'] = f'http://127.0.0.1:{comparison_port}'
+            wait_url(config['comparisonBaseURL'], previous_process)
+            config['pids'].append(previous_process.pid)
+        if REAL_PAYMENTS_TEST:
+            if not PEER_RESALE_TEST:
+                control_token = uuid.uuid4().hex
+
+            class FaultControl(http.server.BaseHTTPRequestHandler):
+                def log_message(self, *args):
+                    pass
+
+                def do_POST(self):
+                    if self.headers.get('Authorization') != 'Bearer ' + control_token or self.path not in ['/clock','/restart-payment','/restart-booking','/restart-transfer']:
+                        self.send_error(403)
+                        return
+                    try:
+                        # Only the process and broker created by this harness can be affected.
+                        if self.path == '/clock':
+                            if not PEER_RESALE_TEST:
+                                self.send_error(404)
+                                return
+                            length = int(self.headers.get('Content-Length','0'))
+                            if length < 1 or length > 200:
+                                self.send_error(400)
+                                return
+                            body = self.rfile.read(length)
+                            for target in ['booking','schedule','payment','transfer']:
+                                advance = urllib.request.Request(f'http://127.0.0.1:{ports[target]}/__fixture/clock', data=body,
+                                    headers={'Content-Type':'application/json','X-Fixture-Token':control_token}, method='POST')
+                                with urllib.request.urlopen(advance,timeout=10) as result:
+                                    result.read()
+                            payload = b'{"advanced":true}'
+                        else:
+                            target = self.path.removeprefix('/restart-')
+                            running[target].kill()
+                            running[target].wait(timeout=10)
+                            if command(['docker','inspect','--format','{{.State.Paused}}',rabbit]) == 'true':
+                                command(['docker', 'unpause', rabbit])
+                            args, child = launches[target]
+                            running[target] = spawn(args, child, target+'-after-crash')
+                            wait_url(f'http://127.0.0.1:{ports[target]}/actuator/health/liveness', running[target])
+                            payload = b'{"restarted":true}'
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'application/json')
+                        self.send_header('Content-Length', str(len(payload)))
+                        self.end_headers()
+                        self.wfile.write(payload)
+                    except Exception:
+                        self.send_error(500, 'Synthetic restart failed; inspect fixture logs')
+
+            control = http.server.ThreadingHTTPServer(('127.0.0.1', 0), FaultControl)
+            threading.Thread(target=control.serve_forever, daemon=True).start()
+            config.update(faultControlURL=f'http://127.0.0.1:{control.server_address[1]}', faultControlToken=control_token)
+            config['fixtureClockEnabled'] = PEER_RESALE_TEST
         (OUT/'runtime.json').write_text(json.dumps(config, indent=2), encoding='utf-8')
         print('Ready: frontend; genuine BFF/Gateway integration', flush=True)
         with (OUT/'browser-api.log').open('w', encoding='utf-8') as log:
@@ -239,6 +339,9 @@ def main():
         print((OUT/'browser-api.log').read_text(encoding='utf-8'), flush=True)
         return result.returncode
     finally:
+        if control is not None:
+            control.shutdown()
+            control.server_close()
         for process in reversed(processes):
             if process.poll() is None:
                 process.terminate()

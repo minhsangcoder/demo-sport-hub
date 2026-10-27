@@ -16,8 +16,8 @@ public class AccessController {
         var bindings=jdbc.query("SELECT id,facility_id FROM staff_facility_bindings b WHERE staff_user_id=? AND is_active=true AND EXISTS(SELECT 1 FROM user_roles r WHERE r.user_id=staff_user_id AND r.role='STAFF') AND NOT EXISTS(SELECT 1 FROM staff_profiles p WHERE p.binding_id=b.id AND NOT p.is_active)",
             (rs,n)->new Binding(rs.getObject("facility_id",UUID.class),jdbc.queryForList("SELECT permission FROM staff_permissions WHERE binding_id=?",String.class,rs.getObject("id",UUID.class))),principal.userId());
         bindings.addAll(jdbc.query("SELECT facility_id,state FROM owner_applications WHERE user_id=? AND state<>'APPROVED'",(r,n)->new Binding(r.getObject("facility_id",UUID.class),Set.of("DRAFT","SUPPLEMENT_REQUIRED").contains(r.getString("state"))?List.of("APPLICATION_READ","APPLICATION_EDIT"):List.of("APPLICATION_READ")),principal.userId()));
-        return ApiResponse.success(new AccessView(profile.id(),profile.fullName(),profile.roles(),bindings));
+        return ApiResponse.success(new AccessView(profile.id(),profile.fullName(),profile.roles(),bindings,profile.status().name(),profile.emailVerified(),profile.phoneVerified()));
     }
     record Binding(UUID facilityId,List<String> permissions){}
-    record AccessView(UUID id,String fullName,Set<com.sporthub.identity.domain.Role> roles,List<Binding> facilityBindings){}
+    record AccessView(UUID id,String fullName,Set<com.sporthub.identity.domain.Role> roles,List<Binding> facilityBindings,String status,boolean emailVerified,boolean phoneVerified){}
 }

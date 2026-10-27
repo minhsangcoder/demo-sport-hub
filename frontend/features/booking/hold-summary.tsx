@@ -169,8 +169,7 @@ function Loaded({ id }: { id: string }) {
         </div>
         <p className="text-xs text-slate-500">
           Thanh toán toàn bộ qua môi trường mô phỏng. Hủy trước thanh toán sẽ giải phóng giữ chỗ.
-          Lưu ý: Lượt đặt trực tiếp không áp dụng hoàn tiền sau khi thanh toán; chính sách hoàn bên
-          dưới áp dụng khi lượt đặt được chuyển nhượng.
+          Lượt đặt trực tiếp không áp dụng hoàn tiền khi khách tự hủy sau khi thanh toán.
         </p>
         <RefundPolicyNotice policy={h.quote.refundPolicy} />
       </section>

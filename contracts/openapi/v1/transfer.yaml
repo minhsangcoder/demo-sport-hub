@@ -419,6 +419,16 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
           }
         ],
         "requestBody": {
@@ -430,7 +440,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Tin P2P yêu cầu expectedVersion, acceptedTermsHash và Idempotency-Key; legacy giữ hợp đồng cũ."
       }
     },
     "/transfers/{id}/withdraw": {
@@ -501,8 +512,29 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
           }
-        ]
+        ],
+        "description": "P2P yêu cầu body version và Idempotency-Key; không rút sau khi người mua khai tiền.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PeerListingVersion"
+              }
+            }
+          }
+        }
       }
     },
     "/transfers/{id}/acquisitions": {
@@ -882,7 +914,7 @@
     "/transfers/quote": {
       "post": {
         "operationId": "quoteTransferListing",
-        "description": "Seller quote with live booking/facility/Owner/x and accepted r from the server; no bank setup.",
+        "description": "REAL mới: báo giá P2P miễn phí chuyển nhượng, chỉ dùng tài khoản cá nhân A đang kích hoạt; cần chấp nhận chia sẻ và hash trước khi đăng. DEMO và legacy giữ luồng đã chốt.",
         "security": [
           {
             "bearerAuth": []
@@ -914,7 +946,17 @@
                       "type": "string"
                     },
                     "data": {
-                      "$ref": "#/components/schemas/DemoTransferTerms"
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/DemoTransferTerms"
+                        },
+                        {
+                          "$ref": "#/components/schemas/FacilityTransferTerms"
+                        },
+                        {
+                          "$ref": "#/components/schemas/PeerSellerTerms"
+                        }
+                      ]
                     },
                     "timestamp": {
                       "type": "string",
@@ -949,7 +991,7 @@
     "/transfers/{id}/quote": {
       "post": {
         "operationId": "quoteTransferEdit",
-        "description": "Current seller edit quote; server resolves booking from listing. No client-provided recipient or booking rebinding.",
+        "description": "REAL mới: báo giá P2P miễn phí chuyển nhượng, chỉ dùng tài khoản cá nhân A đang kích hoạt; cần chấp nhận chia sẻ và hash trước khi đăng. DEMO và legacy giữ luồng đã chốt.",
         "security": [
           {
             "bearerAuth": []
@@ -991,7 +1033,17 @@
                       "type": "string"
                     },
                     "data": {
-                      "$ref": "#/components/schemas/DemoTransferTerms"
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/DemoTransferTerms"
+                        },
+                        {
+                          "$ref": "#/components/schemas/FacilityTransferTerms"
+                        },
+                        {
+                          "$ref": "#/components/schemas/PeerSellerTerms"
+                        }
+                      ]
                     },
                     "timestamp": {
                       "type": "string",
@@ -1021,6 +1073,1977 @@
             "description": "Stale terms, state or conflicting idempotency payload"
           }
         }
+      }
+    },
+    "/transfers/acquisitions/{id}/declare-payment": {
+      "post": {
+        "operationId": "declarePeerPayment",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerAttempt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PeerDeclaration"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfers/acquisitions/{id}/confirm-receipt": {
+      "post": {
+        "operationId": "confirmPeerReceipt",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerAttempt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PeerCommand"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfers/acquisitions/{id}/deny-receipt": {
+      "post": {
+        "operationId": "denyPeerReceipt",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerAttempt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PeerCommand"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfers/acquisitions/{id}/open-dispute": {
+      "post": {
+        "operationId": "openPeerDispute",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerAttempt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PeerCommand"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfers/acquisitions/{id}/peer": {
+      "get": {
+        "operationId": "getPeerAttempt",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerAttempt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        }
+      }
+    },
+    "/transfers/conversations/{id}/messages": {
+      "get": {
+        "operationId": "getPeerMessages",
+        "description": "Without a cursor, returns the latest page in ascending cursor order. Use after for new messages or before for older history; the two cursors are mutually exclusive.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Read messages newer than this cursor; after=0 explicitly reads from the beginning.",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Read the nearest older page before this cursor, returned in ascending order. Cannot be combined with after.",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PeerMessage"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "sendPeerMessage",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerMessage"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PeerMessageInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfers/acquisitions/{id}/evidence": {
+      "post": {
+        "operationId": "uploadPeerEvidence",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerEvidence"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listPeerEvidence",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Private recent READY evidence metadata; immutable older IDs remain readable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "$ref": "#/components/schemas/PeerEvidence"
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        }
+      }
+    },
+    "/transfers/evidence/{id}": {
+      "get": {
+        "operationId": "readPeerEvidence",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        }
+      }
+    },
+    "/transfers/facilities/{facilityId}/cases/{id}/presence": {
+      "post": {
+        "operationId": "recordPeerPresence",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "facilityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerAttempt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PeerPresence"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfers/facilities/{facilityId}/cases/{id}/resolve": {
+      "post": {
+        "operationId": "resolvePeerDispute",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "facilityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerAttempt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PeerResolution"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfers/facilities/{facilityId}/cases": {
+      "get": {
+        "operationId": "listPeerCases",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "facilityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PeerAttempt"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        }
+      }
+    },
+    "/transfers/facilities/{facilityId}/cases/{id}": {
+      "get": {
+        "operationId": "getOwnerPeerCase",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "facilityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Private case data; usage authority never controls peer money",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerCaseDetail"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        }
+      }
+    },
+    "/transfers/facilities/{facilityId}/cases/presence-context": {
+      "get": {
+        "operationId": "getPeerPresenceContext",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "facilityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Private case data; usage authority never controls peer money",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "$ref": "#/components/schemas/PeerPresenceContext"
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        }
+      }
+    },
+    "/transfers/acquisitions/{id}/case": {
+      "get": {
+        "operationId": "getParticipantPeerCase",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Private case data; usage authority never controls peer money",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerCaseDetail"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        }
+      }
+    },
+    "/transfers/acquisitions/{id}/report-late-payment": {
+      "post": {
+        "operationId": "reportPeerLatePayment",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerAttempt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PeerMoneyReport"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfers/acquisitions/{id}/returns": {
+      "post": {
+        "operationId": "declarePeerMoneyReturn",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerAttempt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PeerMoneyReturnInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfers/acquisitions/{id}/returns/{returned}/acknowledge": {
+      "post": {
+        "operationId": "acknowledgePeerMoneyReturn",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "name": "returned",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerAttempt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PeerCommand"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfers/acquisitions/{id}/money-no-claim": {
+      "post": {
+        "operationId": "confirmPeerNoMoneyClaim",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerAttempt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PeerMoneyNoClaim"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfers/acquisitions/{id}/money": {
+      "get": {
+        "operationId": "getPeerMoneyHistory",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "afterReturn",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Private case data; usage authority never controls peer money",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerMoneyView"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        }
+      }
+    },
+    "/transfers/acquisitions/{id}/release": {
+      "post": {
+        "summary": "Người mua hủy lượt giữ P2P chưa khai chuyển tiền",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PeerCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Kết quả canonical; không phát sinh hoàn tiền."
+          },
+          "409": {
+            "description": "Đã khai tiền hoặc phiên bản đã đổi."
+          },
+          "503": {
+            "description": "Chưa rõ kết quả; đối chiếu cùng mã yêu cầu."
+          }
+        }
+      }
+    },
+    "/transfers/acquisitions/{id}/declaration": {
+      "get": {
+        "summary": "A/B đọc chứng từ đã được tiếp nhận trong phiên của mình",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lời khai của B, không phải xác minh ngân hàng.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerDeclarationEvidence"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Không thuộc phiên."
+          },
+          "404": {
+            "description": "Chưa có lời khai được tiếp nhận."
+          }
+        }
+      }
+    },
+    "/transfers/facilities/{facilityId}/cases/{id}/fraud-correction": {
+      "post": {
+        "operationId": "correctPeerFraudFinding",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "facilityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PeerAttempt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PeerFraudCorrection"
+              }
+            }
+          }
+        },
+        "summary": "Owner đính chính kết luận gian dối; giữ nguyên quyết định quyền sân và lịch sử chứng cứ."
       }
     }
   },
@@ -1160,8 +3183,25 @@
             "format": "int64"
           },
           "financeTerms": {
-            "$ref": "#/components/schemas/DemoTransferTerms",
-            "description": "Optional retained legacy listing may have a historical non-DEMO shape. Such records cannot be silently converted into DEMO."
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DemoTransferTerms"
+              },
+              {
+                "$ref": "#/components/schemas/FacilityTransferTerms"
+              },
+              {
+                "$ref": "#/components/schemas/PeerPublicTerms"
+              }
+            ],
+            "description": "P2P công khai chỉ có điều khoản, giá, chính sách hoàn và phiên bản đồng ý chia sẻ; không có danh tính hoặc tài khoản ngân hàng."
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "LEGACY_OWNER",
+              "PEER_RESALE_V1"
+            ]
           }
         },
         "required": [
@@ -1230,8 +3270,33 @@
             "nullable": true
           },
           "financeTerms": {
-            "$ref": "#/components/schemas/DemoTransferTerms",
-            "description": "Optional retained legacy listing may have a historical non-DEMO shape. Such records cannot be silently converted into DEMO."
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DemoTransferTerms"
+              },
+              {
+                "$ref": "#/components/schemas/FacilityTransferTerms"
+              },
+              {
+                "$ref": "#/components/schemas/PeerAcquisitionTerms"
+              }
+            ],
+            "description": "Điều khoản riêng tư chỉ A/B được đọc. Lịch sử legacy giữ nguyên."
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "PEER_RESALE_V1"
+            ],
+            "description": "Present only for the direct resale cohort."
+          },
+          "peer": {
+            "$ref": "#/components/schemas/PeerAttempt"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Private conversation of the acquisition participants."
           }
         },
         "required": [
@@ -1265,13 +3330,17 @@
           "acceptedTermsHash": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$",
-            "description": "Required by DEMO create/edit execution after server quote and explicit consent."
+            "description": "Bắt buộc khi thực hiện sau báo giá và đồng ý rõ điều khoản. P2P bao gồm phiên bản đồng ý chia sẻ tài khoản cho B và SePay."
           },
           "beneficiaryRevisionId": {
             "type": "string",
             "format": "uuid",
             "deprecated": true,
             "description": "Retained legacy field. Ignored for DEMO; no beneficiary account is required."
+          },
+          "bankDestinationRevisionId": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -1295,13 +3364,22 @@
           "acceptedTermsHash": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$",
-            "description": "Required by DEMO create/edit execution after server quote and explicit consent."
+            "description": "Bắt buộc khi thực hiện sau báo giá và đồng ý rõ điều khoản. P2P bao gồm phiên bản đồng ý chia sẻ tài khoản cho B và SePay."
           },
           "beneficiaryRevisionId": {
             "type": "string",
             "format": "uuid",
             "deprecated": true,
             "description": "Retained legacy field. Ignored for DEMO; no beneficiary account is required."
+          },
+          "bankDestinationRevisionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Bắt buộc với tin P2P, phiên bản tin đã xem."
           }
         },
         "required": [
@@ -1348,6 +3426,14 @@
           },
           "transferTerms": {
             "$ref": "#/components/schemas/DemoTransferTerms"
+          },
+          "moneyClass": {
+            "type": "string",
+            "enum": [
+              "REAL",
+              "DEMO",
+              "UNKNOWN"
+            ]
           }
         },
         "required": [
@@ -1481,6 +3567,1220 @@
         "required": [
           "acceptedTermsHash"
         ]
+      },
+      "FacilityTransferTerms": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "moneyClass": {
+            "type": "string",
+            "enum": [
+              "REAL"
+            ]
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "FACILITY_REAL_V1"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "feeBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "quotedFeeAmount": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "quotedSellerNetAmount": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "policyVersion": {
+            "type": "integer"
+          },
+          "receiverOwnerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "receiverRevisionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sellerDestinationRevisionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "termsHash": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "moneyClass",
+          "protocol",
+          "amount",
+          "feeBps",
+          "quotedFeeAmount",
+          "quotedSellerNetAmount",
+          "policyVersion",
+          "receiverOwnerId",
+          "receiverRevisionId",
+          "sellerDestinationRevisionId",
+          "termsHash"
+        ],
+        "description": "B pays P to facility. Facility earns F=HALF_UP(P*x/10000); A is owed N=P-F. No fixed/default 2% or SportHub revenue. B rights do not wait for manual payout. Cancellation rate r is independent."
+      },
+      "PeerCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "termsHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "version",
+          "termsHash"
+        ]
+      },
+      "PeerDeclaration": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "termsHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bankTransactionReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+          },
+          "evidenceIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "version",
+          "termsHash",
+          "bankTransactionReference",
+          "evidenceIds"
+        ]
+      },
+      "PeerMessageInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "PeerMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cursor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "senderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "text": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "cursor",
+          "senderId",
+          "text",
+          "createdAt"
+        ]
+      },
+      "PeerEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "acquisitionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "uploaderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "contentType": {
+            "type": "string",
+            "enum": [
+              "image/jpeg",
+              "image/png"
+            ]
+          },
+          "size": {
+            "type": "integer",
+            "maximum": 5242880
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "STAGED",
+              "READY"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "acquisitionId",
+          "uploaderId",
+          "contentType",
+          "size",
+          "sha256",
+          "state",
+          "createdAt"
+        ]
+      },
+      "PeerPresence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "party": {
+            "type": "string",
+            "enum": [
+              "SELLER",
+              "BUYER"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "party",
+          "reason"
+        ]
+      },
+      "PeerResolution": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "AWARD_BUYER",
+              "SELLER_RETAINS",
+              "BUYER_FRAUD"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "evidenceIds": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "version",
+          "outcome",
+          "reason",
+          "evidenceIds"
+        ],
+        "description": "Owner resolves booking usage only. Peer funds move directly between A and B; this command cannot create or settle a facility refund."
+      },
+      "PeerAttempt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "listingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bookingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sellerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "buyerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "PEER_RESALE_V1"
+            ]
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "WAITING_PAYMENT",
+              "PAYMENT_DECLARED",
+              "DISPUTED",
+              "HANDOFF_PENDING",
+              "COMPLETED",
+              "EXPIRED",
+              "ABORTED_A_RETAINS",
+              "TIMED_OUT_A_RETAINS"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "amount": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "VND"
+            ]
+          },
+          "payBy": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "usageDecisionBy": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "termsHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "confirmationMethod": {
+            "type": "string",
+            "enum": [
+              "NONE",
+              "BUYER_DECLARED",
+              "COUNTERPARTY_ACKNOWLEDGED",
+              "OWNER_ADJUDICATED"
+            ]
+          },
+          "decision": {
+            "type": "object",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "listingId",
+          "bookingId",
+          "sellerId",
+          "buyerId",
+          "protocol",
+          "phase",
+          "version",
+          "amount",
+          "currency",
+          "payBy",
+          "usageDecisionBy",
+          "conversationId",
+          "termsHash",
+          "confirmationMethod",
+          "decision"
+        ],
+        "description": "Only an original REAL booking with sufficient applied collection may enter PEER_RESALE_V1; DEMO bookings are not real peer-payment funding."
+      },
+      "PeerCaseDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "$ref": "#/components/schemas/PeerAttempt"
+          },
+          "booking": {
+            "type": "object",
+            "description": "Original court amount and current lifecycle, without booking credentials"
+          },
+          "recipientRevisionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "destinationHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "moneyCase": {
+            "type": "object"
+          },
+          "declaration": {
+            "type": "object",
+            "nullable": true
+          },
+          "presence": {
+            "type": "array",
+            "maxItems": 2,
+            "items": {
+              "type": "object"
+            }
+          },
+          "history": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object"
+            }
+          },
+          "authority": {
+            "type": "string",
+            "enum": [
+              "USAGE_ONLY"
+            ]
+          },
+          "money": {
+            "$ref": "#/components/schemas/PeerMoneyView"
+          }
+        },
+        "required": [
+          "attempt",
+          "booking",
+          "recipientRevisionId",
+          "destinationHash",
+          "moneyCase",
+          "declaration",
+          "presence",
+          "history",
+          "authority",
+          "money"
+        ]
+      },
+      "PeerPresenceContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bookingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courtId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sellerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "buyerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "PAYMENT_DECLARED",
+              "DISPUTED"
+            ]
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "bookingId",
+          "courtId",
+          "sellerId",
+          "buyerId",
+          "phase",
+          "startsAt",
+          "endsAt"
+        ]
+      },
+      "PeerMoneyReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "termsHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bankTransactionReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "evidenceIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "termsHash",
+          "bankTransactionReference",
+          "evidenceIds"
+        ]
+      },
+      "PeerMoneyReturnInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "termsHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bankTransactionReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "evidenceIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "amount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9999999999
+          }
+        },
+        "required": [
+          "termsHash",
+          "bankTransactionReference",
+          "evidenceIds",
+          "amount"
+        ]
+      },
+      "PeerMoneyNoClaim": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "termsHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "termsHash"
+        ]
+      },
+      "PeerMoneyReturn": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amount": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "AWAITING_BUYER",
+              "BUYER_ACKNOWLEDGED",
+              "WAIVED_BY_BOTH"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reference": {
+            "type": "string"
+          },
+          "evidenceIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "declaredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finalizedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "confirmationMethod": {
+            "type": "string",
+            "enum": [
+              "NONE",
+              "COUNTERPARTY_ACKNOWLEDGED"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "amount",
+          "state",
+          "version",
+          "reference",
+          "evidenceIds",
+          "declaredAt",
+          "finalizedAt",
+          "confirmationMethod"
+        ]
+      },
+      "PeerMoneyView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "acquisitionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amount": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "VND"
+            ]
+          },
+          "termsHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "authority": {
+            "type": "string",
+            "enum": [
+              "COUNTERPARTIES_ONLY"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "NONE",
+              "OPEN",
+              "RETURN_REQUIRED",
+              "RETURN_RECORDED",
+              "CLOSED_UNPROVEN",
+              "CLOSED_NO_RETURN",
+              "CLOSED_RETURNED",
+              "CLOSED_MUTUAL"
+            ]
+          },
+          "noClaims": {
+            "type": "array",
+            "maxItems": 2,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "returns": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/PeerMoneyReturn"
+            }
+          },
+          "returnPage": {
+            "type": "object"
+          },
+          "totals": {
+            "type": "object"
+          },
+          "reports": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "acquisitionId",
+          "amount",
+          "currency",
+          "termsHash",
+          "authority",
+          "state",
+          "noClaims",
+          "returns",
+          "returnPage",
+          "totals",
+          "reports"
+        ]
+      },
+      "PeerListingVersion": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "PeerDeclarationEvidence": {
+        "type": "object",
+        "required": [
+          "reference",
+          "evidenceIds",
+          "claimedAt",
+          "confirmationMethod"
+        ],
+        "properties": {
+          "reference": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "evidenceIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "claimedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "confirmationMethod": {
+            "type": "string",
+            "enum": [
+              "BUYER_DECLARED"
+            ]
+          }
+        }
+      },
+      "PeerPublicTerms": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocol",
+          "mode",
+          "currency",
+          "amount",
+          "termsHash",
+          "bankSharingConsent",
+          "refundPolicy"
+        ],
+        "properties": {
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "PEER_RESALE_V1"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "REAL"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "VND"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,9}$"
+          },
+          "termsHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bankSharingConsent": {
+            "type": "string",
+            "enum": [
+              "BUYER_AND_SEPAY_QR_V1"
+            ]
+          },
+          "refundPolicy": {
+            "type": "object",
+            "required": [
+              "rateBps",
+              "termsHash"
+            ],
+            "properties": {
+              "configured": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "rateBps": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10000
+              },
+              "currency": {
+                "type": "string",
+                "enum": [
+                  "VND"
+                ]
+              },
+              "rounding": {
+                "type": "string",
+                "enum": [
+                  "HALF_UP"
+                ]
+              },
+              "termsHash": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            }
+          }
+        }
+      },
+      "PeerSellerTerms": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocol",
+          "mode",
+          "currency",
+          "amount",
+          "termsHash",
+          "bankSharingConsent",
+          "refundPolicy",
+          "moneyClass",
+          "bookingId",
+          "facilityId",
+          "courtId",
+          "sellerId",
+          "originalAmount",
+          "startsAt",
+          "endsAt",
+          "deadline",
+          "bankDestinationRevisionId",
+          "destinationHash"
+        ],
+        "properties": {
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "PEER_RESALE_V1"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "REAL"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "VND"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,9}$"
+          },
+          "termsHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bankSharingConsent": {
+            "type": "string",
+            "enum": [
+              "BUYER_AND_SEPAY_QR_V1"
+            ]
+          },
+          "refundPolicy": {
+            "type": "object",
+            "required": [
+              "rateBps",
+              "termsHash"
+            ],
+            "properties": {
+              "configured": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "rateBps": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10000
+              },
+              "currency": {
+                "type": "string",
+                "enum": [
+                  "VND"
+                ]
+              },
+              "rounding": {
+                "type": "string",
+                "enum": [
+                  "HALF_UP"
+                ]
+              },
+              "termsHash": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            }
+          },
+          "moneyClass": {
+            "type": "string",
+            "enum": [
+              "REAL"
+            ]
+          },
+          "bookingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "facilityId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courtId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sellerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "originalAmount": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,9}$"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deadline": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "bankDestinationRevisionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "destinationHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      },
+      "PeerAcquisitionTerms": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocol",
+          "mode",
+          "currency",
+          "amount",
+          "termsHash",
+          "bankSharingConsent",
+          "refundPolicy",
+          "moneyClass",
+          "bookingId",
+          "facilityId",
+          "courtId",
+          "sellerId",
+          "originalAmount",
+          "startsAt",
+          "endsAt",
+          "deadline",
+          "bankDestinationRevisionId",
+          "destinationHash",
+          "sellerTermsHash",
+          "listingId",
+          "listingVersion",
+          "acquisitionId",
+          "buyerId",
+          "expiresAt",
+          "acceptedAt"
+        ],
+        "properties": {
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "PEER_RESALE_V1"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "REAL"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "VND"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,9}$"
+          },
+          "termsHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bankSharingConsent": {
+            "type": "string",
+            "enum": [
+              "BUYER_AND_SEPAY_QR_V1"
+            ]
+          },
+          "refundPolicy": {
+            "type": "object",
+            "required": [
+              "rateBps",
+              "termsHash"
+            ],
+            "properties": {
+              "configured": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "rateBps": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10000
+              },
+              "currency": {
+                "type": "string",
+                "enum": [
+                  "VND"
+                ]
+              },
+              "rounding": {
+                "type": "string",
+                "enum": [
+                  "HALF_UP"
+                ]
+              },
+              "termsHash": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            }
+          },
+          "moneyClass": {
+            "type": "string",
+            "enum": [
+              "REAL"
+            ]
+          },
+          "bookingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "facilityId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courtId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sellerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "originalAmount": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,9}$"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deadline": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "bankDestinationRevisionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "destinationHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "sellerTermsHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "listingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "listingVersion": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "acquisitionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "buyerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "acceptedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PeerFraudCorrection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reason",
+          "evidenceIds"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "evidenceIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
       }
     }
   }

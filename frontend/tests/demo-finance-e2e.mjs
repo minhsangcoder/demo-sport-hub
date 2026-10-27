@@ -38,6 +38,7 @@ async function confirmed(actor,id){return poll(()=>call(actor,'GET',`/bookings/$
 async function transfer(bookingId,{pay=true,viaBrowser=false}={}){
  const input={bookingId,price:100000,deadline:new Date(new Date(slot.startsAt).getTime()-60000).toISOString()}
  const quote=await call('a','POST','/transfers/quote',input);assert.equal(quote.mode,'DEMO');assert.equal(quote.feeBps,500);assert.equal(quote.quotedFeeAmount,'5000');assert.equal(quote.receiverFacilityId,fid);assert.equal('beneficiaryRevisionId' in quote,false)
+ assert.notEqual(quote.protocol,'PEER_RESALE_V1','DEMO never becomes a real direct bank payment')
  const listing=await call('a','POST','/transfers',{...input,acceptedTermsHash:quote.termsHash},201,{'Idempotency-Key':key()})
  await poll(()=>call('b','GET',`/transfers/${listing.id}`),d=>d.available)
  const acquisition=await call('b','POST',`/transfers/${listing.id}/acquisitions`,{acceptedTermsHash:quote.termsHash},201,{'Idempotency-Key':key()})
@@ -56,11 +57,13 @@ try{
  const category=await call('admin','POST','/admin/sport-categories',{name:'Finance DEMO '+config.run,active:true},201)
  const facility=await call('owner','POST','/owner/facilities',{name:'Finance DEMO '+config.run,phone:'+84901234567',addressLine:'Synthetic address',provinceCode:'01',province:'Hà Nội',wardCode:'00004',ward:'Ba Đình',timezone:'Asia/Ho_Chi_Minh',amenities:[]},201);fid=facility.id
  for(const name of ['example','rights','guest','counter','group','technical','cancelGuest','partial','uiOnline','uiGuest','uiLinked','uiGroup'])courts[name]=await call('owner','POST',`/owner/facilities/${fid}/courts`,{code:name,name:'Sân DEMO '+name,sportCategoryId:category.id,enabled:true},201)
- await call('owner','PUT',`/schedules/facilities/${fid}/hours`,{intervals:Array.from({length:7},(_,i)=>({dayOfWeek:i+1,opensAt:'00:00',closesAt:'23:55',slotMinutes:5}))})
+ const closesAt=config.demoCompatibility?'23:00':'23:55',slotMinutes=config.demoCompatibility?60:5
+ await call('owner','PUT',`/schedules/facilities/${fid}/hours`,{intervals:Array.from({length:7},(_,i)=>({dayOfWeek:i+1,opensAt:'00:00',closesAt,slotMinutes}))})
  const today=new Date(Date.now()+7*3600000).toISOString().slice(0,10)
- for(let i=1;i<=7;i++)await call('owner','POST',`/schedules/facilities/${fid}/pricing`,{dayOfWeek:i,startsAt:'00:00',endsAt:'23:55',pricePerSlot:120000,priority:0,label:'DEMO court receipt',effectiveFrom:today,currency:'VND'},201)
+ for(let i=1;i<=7;i++)await call('owner','POST',`/schedules/facilities/${fid}/pricing`,{dayOfWeek:i,startsAt:'00:00',endsAt:closesAt,pricePerSlot:120000,priority:0,label:'DEMO court receipt',effectiveFrom:today,currency:'VND'},201)
  sql('facility',`UPDATE facilities SET status='ACTIVE',version=version+1 WHERE id='${fid}'`)
- const start=Math.ceil((Date.now()+20*60000)/300000)*300000;slot={startsAt:new Date(start).toISOString(),endsAt:new Date(start+300000).toISOString()}
+ const tomorrow=new Date(Date.parse(today+'T00:00:00Z')+86400000).toISOString().slice(0,10)
+ const start=config.demoCompatibility?Date.parse(tomorrow+'T10:00:00+07:00'):Math.ceil((Date.now()+20*60000)/300000)*300000;slot={startsAt:new Date(start).toISOString(),endsAt:new Date(start+slotMinutes*60000).toISOString()}
  await call('a','POST','/bookings/holds',{courtId:courts.example.id,...slot,expectedAmount:120000},409,{'Idempotency-Key':key()})
  const refundPolicy=await call('owner','PUT',`/owner/facilities/${fid}/refund-policy`,{rateBps:8000,version:0})
  await call('owner','PUT',`/owner/facilities/${fid}/transfer-policy`,{enabled:true,minLeadSeconds:0})
@@ -81,6 +84,14 @@ try{
  assert.equal(report.moneyAvailability,'COMPLETE');assert.deepEqual([report.summary.money.courtCollected,report.summary.money.transferCollected,report.summary.money.transferFees,report.summary.money.sellerPaid,report.summary.money.policyRefunded,report.summary.money.operatingRevenue,report.summary.money.afterRefund],['120000','100000','5000','95000','80000','125000','45000'])
  await ownerPage.goto(config.baseURL+`/owner/facilities/${fid}/reports`);await ownerPage.getByText('125.000 ₫',{exact:true}).waitFor();await ownerPage.screenshot({path:path.join(output,'actual-report-125000-45000.png'),fullPage:true})
  pass('Real DEMO payment B→facility automatically hands over without A payout; Owner UI executes 95k/80k; DB-backed report 125k/45k without bank setup')
+ if(config.demoCompatibility){
+  assert.equal(sql('booking','SELECT count(*) FROM peer_usage_attempts'),'0')
+  assert.equal(sql('payment','SELECT count(*) FROM payos_qr_sessions'),'0')
+  assert.equal(sql('payment','SELECT count(*) FROM customer_bank_destination_revisions'),'0')
+  assert.deepEqual(errors,[])
+  pass('With PEER enabled, a valid 60-minute DEMO booking retains legacy billing/terms and never creates a real peer attempt, bank QR or personal bank profile')
+  fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({passed:true,scope:'DEMO_COMPATIBILITY_60_MINUTE',checks,initialReport:report,realBankTransfers:false,browserErrors:errors},null,2))
+ }else{
  const rights=await book('a','rights');await collect('a',rights.id);const old=await confirmed('a',rights.id);originalQr=old.checkinToken;const rightsDeal=await transfer(rights.id)
  await call('staff','POST',`/bookings/demo-finance/settlements/${rightsDeal.acquisition.id}/pay-seller`,{outcome:'FAILED'},200,{'Idempotency-Key':key()})
  await call('owner','POST',`/bookings/${rights.id}/check-in`,{token:originalQr},403)
@@ -127,5 +138,6 @@ try{
  pass('Live grant revocation and Admin read-only scope; final DEMO report has technical refunds separate; zero bank-beneficiary or legacy settlement setup')
  assert.deepEqual(errors,[])
  fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({checks,fixture:{facilityId:fid,bookingId:b.id,deal,rightsBookingId:rights.id,technicalBookingId:technical.id},initialReport:report,finalReport:final,browserErrors:errors},null,2))
+ }
 }catch(error){let n=0;for(const context of contexts)for(const page of context.pages()){fs.writeFileSync(path.join(output,`failure-${n}.txt`),await page.locator('body').innerText().catch(()=>''));await page.screenshot({path:path.join(output,`failure-${n++}.png`),fullPage:true}).catch(()=>{})}throw error
 }finally{for(const context of contexts)await context.close();if(browser)await browser.close();for(const actor of Object.values(actors))await actor.http.dispose();await guest.dispose()}

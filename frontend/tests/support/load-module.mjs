@@ -5,10 +5,10 @@ import vm from 'node:vm'
 import ts from 'typescript'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
-export function moduleLoader(globals = {}, overrides = {}) {
+export function moduleLoader(globals = {}, overrides = {}, sourceRoot = root) {
   const cache = new Map()
   function load(relative) {
-    const file = path.resolve(root, relative)
+    const file = path.resolve(sourceRoot, relative)
     if (cache.has(file)) return cache.get(file)
     const exports = {}
     cache.set(file, exports)
@@ -20,10 +20,10 @@ export function moduleLoader(globals = {}, overrides = {}) {
       AbortSignal, DOMException, crypto: globalThis.crypto, Event, queueMicrotask, setTimeout, clearTimeout, ...globals,
       require(name) {
         if (Object.hasOwn(overrides, name)) return overrides[name]
-        let target = name.startsWith('@/') ? path.resolve(root, name.slice(2)) : path.resolve(path.dirname(file), name)
+        let target = name.startsWith('@/') ? path.resolve(sourceRoot, name.slice(2)) : path.resolve(path.dirname(file), name)
         if (!existsSync(target)) target += existsSync(target + '.ts') ? '.ts' : '.tsx'
         if (target.endsWith('.json')) return { default: JSON.parse(readFileSync(target, 'utf8')) }
-        return load(path.relative(root, target))
+        return load(path.relative(sourceRoot, target))
       },
     }, { filename: file })
     return exports

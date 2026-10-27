@@ -7,15 +7,21 @@ import org.springframework.util.AntPathMatcher;
 @Component
 public class PublicRouteMatcher {
 
-    private final GatewaySecurityProperties properties;
-    private final AntPathMatcher pathMatcher = new AntPathMatcher();
+  private final GatewaySecurityProperties properties;
+  private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
-    public PublicRouteMatcher(GatewaySecurityProperties properties) {
-        this.properties = properties;
-    }
+  public PublicRouteMatcher(GatewaySecurityProperties properties) {
+    this.properties = properties;
+  }
 
-    public boolean isPublic(String path) {
-        return properties.getPublicPaths().stream()
-                .anyMatch(pattern -> pathMatcher.match(pattern, path));
-    }
+  public boolean isPublic(String path) {
+    return properties.getPublicPaths().stream()
+        .anyMatch(pattern -> pathMatcher.match(pattern, path));
+  }
+
+  public boolean isPublic(String path, org.springframework.http.HttpMethod method) {
+    if (pathMatcher.match("/api/v1/payments/providers/payos/*/webhook", path)
+        && !org.springframework.http.HttpMethod.POST.equals(method)) return false;
+    return isPublic(path);
+  }
 }

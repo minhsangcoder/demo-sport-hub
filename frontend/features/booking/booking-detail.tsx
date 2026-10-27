@@ -15,7 +15,7 @@ import type { Facility, Court } from '@/features/facility/types'
 import { type BookingDetail, type Payment, statusLabels } from './types'
 import { Countdown } from './countdown'
 import { operationsWorkspace, ownsBooking } from './ownership'
-import { ParticipantDemoMoney, PolicyCancellationPanel } from './demo-finance'
+import { ParticipantMoney } from './finance-panels'
 export function BookingDetailPage({ id }: { id: string }) {
   return (
     <RequireAuth>
@@ -72,7 +72,7 @@ function Loaded({ id }: { id: string }) {
       setBusy(false)
     }
   }
-  if (resource.loading)
+  if (resource.loading && !resource.data)
     return (
       <p role="status" className="p-8">
         Đang tải lượt đặt…
@@ -166,44 +166,58 @@ function Loaded({ id }: { id: string }) {
       </section>
       {b.status === 'CONFIRMED' && isOwner && (
         <div className="mt-6 space-y-4">
+          {b.priceSnapshot.moneyClass === 'REAL' && !resource.data?.resaleConsumed && (
+            <Link
+              href={`/customer/bookings/${id}/transfer`}
+              className="inline-block rounded-full bg-emerald-600 px-5 py-3 text-sm font-semibold text-white"
+            >
+              Đăng tin chuyển nhượng trực tiếp
+            </Link>
+          )}
+          {resource.data?.resaleConsumed && (
+            <p className="text-sm text-slate-600">
+              Lượt đặt đã chuyển nhượng một lần, không thể đăng bán tiếp.
+            </p>
+          )}
           {isTransferred ? (
-            <>
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                <strong>Lượt đặt nhận qua chuyển nhượng:</strong> Bạn là người mua lại lượt đặt này.
-                Nếu hủy hợp lệ trước giờ chơi, bạn sẽ được hoàn tiền theo tỷ lệ chính sách cơ sở
-                tính trên số tiền bạn đã mua lại.
-              </div>
-              <PolicyCancellationPanel bookingId={id} onSuccess={resource.reload} />
-            </>
+            <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
+              Lượt đặt nhận qua chuyển nhượng không áp dụng hoàn tiền khi tự hủy.
+            </p>
           ) : (
             <section className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-5">
               <h3 className="font-semibold text-slate-800">Tùy chọn khi không thể tham gia</h3>
               <p className="text-sm text-slate-600">
                 Theo chính sách cơ sở,{' '}
                 <strong>người đặt trực tiếp không áp dụng hoàn tiền khi tự hủy</strong>. Quý khách
-                có thể đăng chuyển nhượng để sang nhượng lại cho người khác trên hệ thống.
+                có thể đăng chuyển nhượng để sang nhượng lại cho người khác trên hệ thống. Với
+                chuyển nhượng trực tiếp thành công, bạn nhận 100% giá chuyển nhượng đã chốt từ người
+                mua; nếu không chuyển nhượng được và không đến sân, bạn mất toàn bộ tiền đã trả.
               </p>
               <div className="flex flex-wrap items-center gap-3 pt-1">
-                <Link
-                  href={`/customer/bookings/${id}/transfer`}
-                  className="inline-block rounded-full bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700"
-                >
-                  Đăng tin chuyển nhượng lượt đặt
-                </Link>
-                <Button
-                  variant="outline"
-                  className="border-rose-300 text-rose-700 hover:bg-rose-50"
-                  onClick={cancelConfirmedDirect}
-                  disabled={busy}
-                >
-                  Hủy lượt đặt (Không hoàn tiền)
-                </Button>
+                {b.priceSnapshot.moneyClass !== 'REAL' && (
+                  <Link
+                    href={`/customer/bookings/${id}/transfer`}
+                    className="inline-block rounded-full bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700"
+                  >
+                    Đăng tin chuyển nhượng lượt đặt
+                  </Link>
+                )}
+                {b.priceSnapshot.moneyClass !== 'REAL' && (
+                  <Button
+                    variant="outline"
+                    className="border-rose-300 text-rose-700 hover:bg-rose-50"
+                    onClick={cancelConfirmedDirect}
+                    disabled={busy}
+                  >
+                    Hủy lượt đặt (Không hoàn tiền)
+                  </Button>
+                )}
               </div>
             </section>
           )}
         </div>
       )}
-      <ParticipantDemoMoney bookingId={id} />
+      <ParticipantMoney bookingId={id} moneyClass={b.priceSnapshot.moneyClass} />
       {b.status === 'PENDING' && isOwner && (
         <div className="mt-6 space-y-4">
           <Countdown expiresAt={b.holdExpiresAt} />

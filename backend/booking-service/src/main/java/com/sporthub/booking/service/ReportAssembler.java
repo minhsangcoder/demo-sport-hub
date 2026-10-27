@@ -50,23 +50,33 @@ final class ReportAssembler {
         window,
         asOf,
         cutoff,
-        "DEMO",
-        "Dữ liệu DEMO — không phát sinh giao dịch tiền thật",
+        t.mode,
+        t.mode.equals("REAL")
+            ? "Thu ngân hàng đã xác minh; chi trả do cơ sở xác nhận thủ công"
+            : "Dữ liệu DEMO — không phát sinh giao dịch tiền thật",
         Map.of(
             "courtCollected",
             "paidAt",
             "transferCollected",
-            "paidAt",
+            t.mode.equals("REAL") ? "bankTime per native credit" : "paidAt",
             "transferFees",
             "handoffAt",
             "sellerPaid",
-            "demoPaidAt",
+            t.mode.equals("REAL") ? "confirmedAt; MANUALLY_RECORDED" : "demoPaidAt",
             "policyRefunded",
-            "demoRefundedAt",
+            t.mode.equals("REAL")
+                ? "confirmedAt per allocation; MANUALLY_RECORDED"
+                : "demoRefundedAt",
             "bookings",
             "startsAt; current status at asOf",
             "obligations",
-            "created before cutoff minus successful executions before cutoff"),
+            "created before cutoff minus successful executions before cutoff",
+            "bankCollected",
+            t.mode.equals("REAL") ? "bankTime per native credit" : "not applicable to DEMO",
+            "unappliedCollected",
+            t.mode.equals("REAL")
+                ? "bankTime; unapplied at obligationCutoff"
+                : "not applicable to DEMO"),
         availability,
         List.copyOf(reasons),
         new Summary(
@@ -79,6 +89,7 @@ final class ReportAssembler {
             summary.money()),
         days,
         courtRows,
-        pages);
+        pages,
+        t.peer);
   }
 }

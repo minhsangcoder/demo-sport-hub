@@ -114,3 +114,15 @@ test('DEMO transfer binds Owner-selected fee to receiving facility and explicit 
   const monitor = admin.paths['/admin/bookings/demo-finance']
   assert.ok(monitor.get); assert.equal(Object.hasOwn(monitor, 'post'), false)
 })
+
+test('direct peer consideration has a separate bounded page and cannot claim bank verification', () => {
+  const schemas=booking.components.schemas, report=schemas.PeerFacilityReport
+  assert.equal(booking.paths['/bookings/reports/facility/{id}/dashboard'].get.parameters.find(p=>p.name==='peerPage').schema.minimum,0)
+  assert.equal(schemas.DemoFacilityDashboard.properties.peer.$ref,'#/components/schemas/PeerFacilityReport')
+  assert.match(report.description,/never facility revenue/)
+  assert.match(report.description,/pre-period cases/)
+  assert.equal(schemas.PeerReportPage.properties.items.maxItems,100)
+  assert.deepEqual(schemas.PeerReportRow.properties.confirmationMethod.enum,['NONE','BUYER_DECLARED','COUNTERPARTY_ACKNOWLEDGED','OWNER_ADJUDICATED'])
+  for(const name of ['buyerDeclaredAmount','sellerAcknowledgedAmount','ownerAwardedAmount','returnDeclaredAmount','returnAcknowledgedAmount'])assert.equal(report.properties[name].type,'string')
+  for(const name of ['bankAccountNumber','apiKey','checksumKey','bankReference','evidenceIds'])assert.equal(Object.hasOwn(schemas.PeerReportRow.properties,name),false)
+})

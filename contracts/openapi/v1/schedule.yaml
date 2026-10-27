@@ -743,6 +743,157 @@
           }
         }
       }
+    },
+    "/schedules/facilities/{id}/booking-policy": {
+      "get": {
+        "operationId": "getFlexibleBookingPolicy",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/FlexibleBookingPolicy"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        }
+      },
+      "put": {
+        "operationId": "publishFlexibleBookingPolicy",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/FlexibleBookingPolicy"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleBookingPolicy"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -993,16 +1144,53 @@
             "enum": [
               "VND"
             ]
+          },
+          "pricingUnit": {
+            "type": "string",
+            "enum": [
+              "LEGACY_SLOT",
+              "HOURLY"
+            ]
+          },
+          "pricePerHour": {
+            "type": "integer",
+            "minimum": 1
           }
         },
         "required": [
           "startsAt",
           "endsAt",
-          "pricePerSlot",
           "priority",
           "label",
           "effectiveFrom",
           "currency"
+        ],
+        "oneOf": [
+          {
+            "required": [
+              "pricePerSlot"
+            ],
+            "properties": {
+              "pricingUnit": {
+                "enum": [
+                  "LEGACY_SLOT"
+                ]
+              }
+            }
+          },
+          {
+            "required": [
+              "pricingUnit",
+              "pricePerHour"
+            ],
+            "properties": {
+              "pricingUnit": {
+                "enum": [
+                  "HOURLY"
+                ]
+              }
+            }
+          }
         ]
       },
       "PriceRule": {
@@ -1074,6 +1262,18 @@
           },
           "version": {
             "type": "integer"
+          },
+          "pricingUnit": {
+            "type": "string",
+            "enum": [
+              "LEGACY_SLOT",
+              "HOURLY"
+            ]
+          },
+          "pricePerHour": {
+            "type": "integer",
+            "minimum": 1,
+            "nullable": true
           }
         },
         "required": [
@@ -1142,7 +1342,7 @@
           "amount": {
             "type": "number",
             "minimum": 0,
-            "exclusiveMinimum": true,
+            "exclusiveMinimum": false,
             "nullable": true
           },
           "currency": {
@@ -1159,6 +1359,15 @@
           "ruleLabel": {
             "type": "string",
             "nullable": true
+          },
+          "pricePerHour": {
+            "type": "integer",
+            "minimum": 1,
+            "nullable": true
+          },
+          "durationMinutes": {
+            "type": "integer",
+            "minimum": 1
           }
         },
         "required": [
@@ -1196,6 +1405,29 @@
             "items": {
               "$ref": "#/components/schemas/Slot"
             }
+          },
+          "pricingMode": {
+            "type": "string",
+            "enum": [
+              "LEGACY_SLOT",
+              "HOURLY_INTERVAL_V1"
+            ]
+          },
+          "selectionStepMinutes": {
+            "type": "integer",
+            "nullable": true
+          },
+          "minimumMinutes": {
+            "type": "integer",
+            "nullable": true
+          },
+          "maximumMinutes": {
+            "type": "integer",
+            "nullable": true
+          },
+          "policyVersion": {
+            "type": "integer",
+            "minimum": 0
           }
         },
         "required": [
@@ -1241,6 +1473,69 @@
             "items": {
               "$ref": "#/components/schemas/Slot"
             }
+          },
+          "quoteVersion": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ]
+          },
+          "pricingMode": {
+            "type": "string",
+            "enum": [
+              "LEGACY_SLOT",
+              "HOURLY_INTERVAL_V1"
+            ]
+          },
+          "pricingRevision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "policyVersion": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "durationMinutes": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 240
+          },
+          "quoteHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "startsAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "endsAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "code",
+                "startsAt",
+                "endsAt"
+              ]
+            }
+          },
+          "suggestions": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "$ref": "#/components/schemas/QuoteInput"
+            }
           }
         },
         "required": [
@@ -1252,6 +1547,44 @@
           "currency",
           "timezone",
           "segments"
+        ]
+      },
+      "FlexibleBookingPolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "selectionStepMinutes": {
+            "type": "integer",
+            "enum": [
+              30
+            ]
+          },
+          "minimumMinutes": {
+            "type": "integer",
+            "enum": [
+              60
+            ]
+          },
+          "maximumMinutes": {
+            "type": "integer",
+            "enum": [
+              240
+            ]
+          }
+        },
+        "required": [
+          "enabled",
+          "version",
+          "selectionStepMinutes",
+          "minimumMinutes",
+          "maximumMinutes"
         ]
       }
     }

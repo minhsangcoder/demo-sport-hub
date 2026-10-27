@@ -22,6 +22,7 @@ public class BookingUsage {
   private final Clock clock;
   private final BookingLifecycle lifecycle;
   private final BookingReads reads;
+  private final PeerUsageTimeouts peerTimeouts;
 
   public BookingUsage(
       BookingRepository repo,
@@ -29,13 +30,15 @@ public class BookingUsage {
       @Value("${JWT_SECRET}") String secret,
       Clock clock,
       BookingLifecycle lifecycle,
-      BookingReads reads) {
+      BookingReads reads,
+      PeerUsageTimeouts peerTimeouts) {
     this.repo = repo;
     this.dependencies = dependencies;
     this.secret = secret;
     this.clock = clock;
     this.lifecycle = lifecycle;
     this.reads = reads;
+    this.peerTimeouts = peerTimeouts;
   }
 
   @Transactional
@@ -45,6 +48,16 @@ public class BookingUsage {
     var b = repo.find(id);
     repo.lock(b.courtId());
     b = repo.find(id);
+    if (BookingMoneyCohorts.isReal(b)
+        && repo.jdbc()
+                .queryForObject(
+                    "SELECT count(*) FROM booking_real_collections WHERE booking_id=? AND"
+                        + " purpose<>'TRANSFER'",
+                    Integer.class,
+                    id)
+            > 0)
+      throw new ConflictException(
+          "Lượt đặt đã nhận tiền không hỗ trợ hủy trực tiếp. Liên hệ cơ sở để xử lý yêu cầu hợp lệ.");
     if (input == null
         || input.reason() == null
         || input.reason().isBlank()
@@ -58,15 +71,14 @@ public class BookingUsage {
       dependencies.facilityPermission(b.facilityId(), caller, token, "BOOKING_CANCEL_PENDING");
     else caller.requireRole("CUSTOMER");
     if (b.status().equals("CANCELLED")) return reads.projectEffective(b);
-    boolean isTransferred = repo.jdbc()
-            .queryForObject(
-                "SELECT count(*) FROM transfer_handoffs WHERE booking_id=?",
-                Integer.class,
-                id)
-        > 0;
+    boolean isTransferred =
+        repo.jdbc()
+                .queryForObject(
+                    "SELECT count(*) FROM transfer_handoffs WHERE booking_id=?", Integer.class, id)
+            > 0;
     if (b.status().equals("CONFIRMED") && isTransferred)
       throw new ConflictException(
-          "Review a cancellation quote and use cancel-with-policy for this booking");
+          "Lượt đặt nhận qua chuyển nhượng không áp dụng hoàn tiền khi tự hủy.");
     if (!Set.of("PENDING", "CONFIRMED").contains(b.status()))
       throw new ConflictException(
           "Only pending or confirmed bookings may be cancelled before play");
@@ -82,8 +94,7 @@ public class BookingUsage {
       throw new ConflictException("Withdraw/reconcile the transfer listing before cancelling");
     if (b.status().equals("CONFIRMED") && !self)
       throw new ConflictException(
-          "BLOCKED_RULE: facility paid cancellation requires the 100% refund"
-              + " execution/reconciliation protocol");
+          "Lượt đặt đã nhận tiền không hỗ trợ hủy trực tiếp. Liên hệ cơ sở để xử lý yêu cầu hợp lệ.");
     if (b.status().equals("CONFIRMED") && (b.paymentId() == null || b.paidAt() == null))
       throw new ConflictException("Confirmed payment evidence is incomplete");
     if (b.status().equals("PENDING")
@@ -128,7 +139,8 @@ public class BookingUsage {
                 input.bookingCode().toUpperCase(Locale.ROOT));
     if (ids.isEmpty())
       throw new ResourceNotFoundException("Booking code not found at this facility");
-    return checkin(ids.getFirst(), null, caller, token, true);
+    return checkin(
+        ids.getFirst(), input.bookingCode().toUpperCase(Locale.ROOT), caller, token, true);
   }
 
   public Booking checkin(UUID id, String checkinCode, Caller caller, String token, boolean manual) {
@@ -136,6 +148,9 @@ public class BookingUsage {
     repo.lock(b.courtId());
     b = repo.find(id);
     dependencies.facilityPermission(b.facilityId(), caller, token, "BOOKING_CHECK_IN");
+    if (manual && !Objects.equals(b.bookingCode(), checkinCode))
+      throw new ResourceNotFoundException("Booking code not found at this facility");
+    peerTimeouts.settleBookingUnderCourt(id);
     if (!b.status().equals("CONFIRMED"))
       throw new ConflictException("Only a confirmed booking may check in once");
     if (!reads.isGroup(id) && (b.paymentId() == null || b.paidAt() == null))

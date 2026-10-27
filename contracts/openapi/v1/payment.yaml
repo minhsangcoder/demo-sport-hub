@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "SportHub Payment (local demo adapter)",
+    "title": "SportHub Payment — verified payOS collections",
     "version": "1.0.0"
   },
   "servers": [
@@ -468,6 +468,988 @@
           }
         }
       }
+    },
+    "/payments/facilities/{id}/channel": {
+      "get": {
+        "operationId": "getFacilityPaymentChannel",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PaymentChannel"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        }
+      },
+      "put": {
+        "operationId": "configureFacilityPaymentChannel",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PaymentChannel"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentChannelInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/facilities/{id}/channel/verify": {
+      "post": {
+        "operationId": "verifyFacilityPaymentChannel",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PaymentChannel"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionCommand"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/facilities/{id}/channel/disable": {
+      "post": {
+        "operationId": "disableFacilityPaymentChannel",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PaymentChannel"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionCommand"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/bank-destinations": {
+      "get": {
+        "operationId": "listBankDestinations",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        }
+      },
+      "post": {
+        "operationId": "registerBankDestination",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BankDestination"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BankDestinationInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/banks": {
+      "get": {
+        "operationId": "listSupportedBanks",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BankCatalog"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        }
+      }
+    },
+    "/payments/{id}/qr": {
+      "get": {
+        "operationId": "getPaymentQr",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PaymentQrSession"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        }
+      }
+    },
+    "/payments/{id}/refresh": {
+      "post": {
+        "operationId": "schedulePaymentRefresh",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PaymentQrSession"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        }
+      }
+    },
+    "/payments/providers/payos/{channelId}/webhook": {
+      "post": {
+        "operationId": "receivePayosWebhook",
+        "security": [],
+        "parameters": [
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        },
+        "description": "Native data HMAC required; ACK only after durable observation. Signed foreign/sample credits never grant rights.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativePayosWebhook"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/bookings/{id}/guest-bank-destinations": {
+      "post": {
+        "operationId": "registerGuestBankDestination",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BankDestination"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BankDestinationInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/{id}/qr-image": {
+      "get": {
+        "operationId": "getNativeBankQrImage",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "string",
+                      "description": "Private PNG data URL; generated locally from the authenticated native QR payload."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Outside current role/facility scope"
+          },
+          "409": {
+            "description": "Stale version or conflicting command"
+          },
+          "503": {
+            "description": "Dependency unavailable; no simulation fallback"
+          }
+        }
+      }
+    },
+    "/payments/runtime": {
+      "get": {
+        "operationId": "getServerPaymentRuntime",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deployment-owned mode, never browser-selected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "mode",
+                        "collectionCreateEnabled"
+                      ],
+                      "properties": {
+                        "mode": {
+                          "type": "string",
+                          "enum": [
+                            "REAL",
+                            "DEMO"
+                          ]
+                        },
+                        "collectionCreateEnabled": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/bank-profile": {
+      "get": {
+        "operationId": "getPersonalBankProfile",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BankProfile"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        }
+      }
+    },
+    "/payments/peer-acquisitions/{id}/qr": {
+      "get": {
+        "operationId": "getPeerSePayQr",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        }
+      }
+    },
+    "/payments/peer-acquisitions/{id}/instruction": {
+      "get": {
+        "operationId": "getPeerPaymentInstruction",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Private bound instruction; image creation does not certify payment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PeerQrInstruction"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        }
+      }
+    },
+    "/payments/peer-acquisitions/{id}/case-recipient": {
+      "get": {
+        "operationId": "getOwnerPeerCaseRecipient",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current facility Owner case access; frozen masked recipient, never full account or credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BankDestination"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Invalid session"
+          },
+          "403": {
+            "description": "Outside participant or facility scope"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "Version, phase or BANK_PROFILE_LOCKED conflict"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authoritative dependency unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -564,6 +1546,14 @@
             "type": "string",
             "format": "uuid",
             "nullable": true
+          },
+          "moneyClass": {
+            "type": "string",
+            "enum": [
+              "REAL",
+              "DEMO",
+              "UNKNOWN"
+            ]
           }
         },
         "required": [
@@ -688,6 +1678,539 @@
           "state",
           "amount",
           "policyReference"
+        ]
+      },
+      "PaymentChannelInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "clientId": {
+            "type": "string",
+            "writeOnly": true,
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "apiKey": {
+            "type": "string",
+            "writeOnly": true,
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "checksumKey": {
+            "type": "string",
+            "writeOnly": true,
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "bankBin": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$"
+          }
+        },
+        "required": [
+          "version",
+          "clientId",
+          "apiKey",
+          "checksumKey",
+          "bankBin"
+        ]
+      },
+      "PaymentChannel": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channelId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "facilityId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "receiverOwnerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PREPARING",
+              "READY",
+              "DISABLED"
+            ]
+          },
+          "credentialsConfigured": {
+            "type": "boolean"
+          },
+          "bankBin": {
+            "type": "string"
+          },
+          "maskedAccountNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "accountName": {
+            "type": "string",
+            "nullable": true
+          },
+          "webhookUrl": {
+            "type": "string"
+          },
+          "receiverRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        },
+        "required": [
+          "channelId",
+          "facilityId",
+          "receiverOwnerId",
+          "version",
+          "status",
+          "credentialsConfigured",
+          "bankBin",
+          "maskedAccountNumber",
+          "accountName",
+          "webhookUrl",
+          "receiverRevisionId"
+        ]
+      },
+      "VersionCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
+      "BankDestinationInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "bankBin": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$"
+          },
+          "accountNumber": {
+            "type": "string",
+            "pattern": "^[0-9]{1,19}$",
+            "writeOnly": true
+          },
+          "accountName": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "consentReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "expectedProfileVersion": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "bankBin",
+          "accountNumber",
+          "consentReference"
+        ]
+      },
+      "BankDestination": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "guestBookingId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "bankBin": {
+            "type": "string"
+          },
+          "bankName": {
+            "type": "string"
+          },
+          "maskedAccountNumber": {
+            "type": "string"
+          },
+          "accountName": {
+            "type": "string"
+          },
+          "destinationHash": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "verificationMethod": {
+            "type": "string",
+            "enum": [
+              "SELF_DECLARED"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "principalId",
+          "guestBookingId",
+          "bankBin",
+          "bankName",
+          "maskedAccountNumber",
+          "accountName",
+          "destinationHash",
+          "createdAt",
+          "verificationMethod"
+        ]
+      },
+      "BankCatalog": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "banks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "bin": {
+                  "type": "string",
+                  "pattern": "^[0-9]{6}$"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "shortName": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "bin",
+                "name",
+                "shortName"
+              ]
+            }
+          }
+        },
+        "required": [
+          "updatedAt",
+          "banks"
+        ]
+      },
+      "PaymentQrSession": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "paymentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "INITIALIZING",
+              "CREATE_UNKNOWN",
+              "READY",
+              "PARTIAL",
+              "VERIFIED",
+              "EXPIRED",
+              "REVIEW"
+            ]
+          },
+          "moneyClass": {
+            "type": "string",
+            "enum": [
+              "REAL"
+            ]
+          },
+          "channelId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "receiverRevisionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderCode": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 78364164095
+          },
+          "description": {
+            "type": "string",
+            "pattern": "^[A-Z0-9]{1,9}$",
+            "maxLength": 9
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "amountReceived": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "bankBin": {
+            "type": "string",
+            "nullable": true
+          },
+          "accountNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "accountName": {
+            "type": "string",
+            "nullable": true
+          },
+          "qrCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "checkoutUrl": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "confirmationMethod": {
+            "type": "string",
+            "enum": [
+              "BANK_VERIFIED"
+            ],
+            "nullable": true
+          },
+          "applicationState": {
+            "type": "string"
+          },
+          "lastErrorCode": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "paymentId",
+          "state",
+          "moneyClass",
+          "channelId",
+          "receiverRevisionId",
+          "orderCode",
+          "description",
+          "amount",
+          "amountReceived",
+          "expiresAt"
+        ],
+        "description": "Private payer/current counter operator projection. Receiver bank details/QR remain null until signed native create has matched the Owner-selected BIN and confirmed account. Unknown-create recovery can return only the trusted payOS checkout URL. GET reads local state; refresh schedules bounded reconciliation."
+      },
+      "NativePayosWebhook": {
+        "type": "object",
+        "required": [
+          "data",
+          "signature"
+        ],
+        "properties": {
+          "data": {
+            "type": "object"
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{64}$"
+          },
+          "code": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
+      "BankResponsibility": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "resourceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "effectiveUntil": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "kind",
+          "resourceId",
+          "effectiveUntil"
+        ]
+      },
+      "BankProfile": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "activeRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "destinationHash": {
+            "type": "string",
+            "nullable": true
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "initialized": {
+            "type": "boolean"
+          },
+          "canRegisterFirst": {
+            "type": "boolean"
+          },
+          "canChange": {
+            "type": "boolean"
+          },
+          "responsibilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BankResponsibility"
+            }
+          },
+          "destination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BankDestination"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "principalId",
+          "activeRevisionId",
+          "destinationHash",
+          "version",
+          "initialized",
+          "canRegisterFirst",
+          "canChange",
+          "responsibilities",
+          "destination"
+        ]
+      },
+      "PeerQrInstruction": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "acquisitionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "PEER_RESALE_V1"
+            ]
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "WAITING_PAYMENT"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,9}$"
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "VND"
+            ]
+          },
+          "memo": {
+            "type": "string",
+            "pattern": "^SH[0-9]{1,18}$"
+          },
+          "payBy": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "qrUrl": {
+            "type": "string",
+            "description": "Authenticated SportHub image path; no provider or account query parameters"
+          },
+          "bankName": {
+            "type": "string"
+          },
+          "maskedAccountNumber": {
+            "type": "string"
+          },
+          "accountName": {
+            "type": "string",
+            "description": "Self-declared by the seller; not bank verified"
+          },
+          "accountVerification": {
+            "type": "string",
+            "enum": [
+              "SELF_DECLARED"
+            ]
+          },
+          "confirmationMethod": {
+            "type": "string",
+            "enum": [
+              "NONE"
+            ]
+          }
+        },
+        "required": [
+          "acquisitionId",
+          "protocol",
+          "phase",
+          "amount",
+          "currency",
+          "memo",
+          "payBy",
+          "qrUrl",
+          "bankName",
+          "maskedAccountNumber",
+          "accountName",
+          "accountVerification",
+          "confirmationMethod"
         ]
       }
     }

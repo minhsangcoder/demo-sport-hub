@@ -105,8 +105,10 @@ sporthub:
         - /api/v1/sport-categories
         - /api/v1/schedules/public/**
         - /api/v1/bookings/availability
+        - /api/v1/bookings/quote
         - /api/v1/bookings/search
         - /api/v1/payments/providers/demo/callback
+        - /api/v1/payments/providers/payos/*/webhook
         - /actuator/health/**
 
 jwt:

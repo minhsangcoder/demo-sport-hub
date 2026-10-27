@@ -29,7 +29,12 @@ public class ScheduleRepository {
             new PriceRule(uuid(r,"id"),facility,uuid(r,"court_id"),uuid(r,"sport_category_id"),r.getObject("day_of_week")==null?null:r.getInt("day_of_week"),
                 r.getObject("specific_date",LocalDate.class),r.getObject("start_time",LocalTime.class),r.getObject("end_time",LocalTime.class),
                 r.getBigDecimal("price_per_slot"),r.getInt("priority"),r.getString("label"),r.getObject("effective_from",LocalDate.class),
-                r.getObject("effective_to",LocalDate.class),r.getString("currency"),r.getBoolean("is_active"),r.getLong("version"),uuid(r,"court_type_id"),r.getString("court_type")),facility);
+                r.getObject("effective_to",LocalDate.class),r.getString("currency"),r.getBoolean("is_active"),r.getLong("version"),uuid(r,"court_type_id"),r.getString("court_type"),r.getString("pricing_unit"),r.getBigDecimal("price_per_hour")),facility);
+    }
+    public BookingPolicy bookingPolicy(UUID facility) {
+        return jdbc.query("SELECT * FROM facility_booking_policies WHERE facility_id=?",(r,n)->
+            new BookingPolicy(r.getBoolean("enabled"),r.getLong("version"),r.getInt("selection_step_minutes"),r.getInt("minimum_minutes"),r.getInt("maximum_minutes")),facility)
+            .stream().findFirst().orElse(new BookingPolicy(false,0,30,60,240));
     }
     private static UUID uuid(ResultSet r,String name) throws SQLException {return r.getObject(name,UUID.class);}
 }

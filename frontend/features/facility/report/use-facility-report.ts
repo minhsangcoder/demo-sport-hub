@@ -14,8 +14,16 @@ export function useFacilityReport() {
   const [range, setRange] = useState<ReportRange>(() => reportPreset(facility.timezone, '7'))
   const [draft, setDraft] = useState(range)
   const [page, setPage] = useState(0)
+  const [peerPage, setPeerPage] = useState(0)
   const [error, setError] = useState('')
-  const params = new URLSearchParams({ ...range, page: String(page), size: '25' })
+  const [selectedMode, setSelectedMode] = useState<'REAL' | 'DEMO' | null>(null)
+  const params = new URLSearchParams({
+    ...range,
+    page: String(page),
+    size: '25',
+    ...(selectedMode ? { mode: selectedMode } : {}),
+    peerPage: String(peerPage),
+  })
   const resource = useApi<FacilityDemoReport>(
     `/bookings/reports/facility/${facility.id}/dashboard?${params}`,
   )
@@ -28,6 +36,7 @@ export function useFacilityReport() {
     setRange(initial)
     setDraft(initial)
     setPage(0)
+    setPeerPage(0)
     setError('')
   }
   useEffect(() => {
@@ -50,9 +59,11 @@ export function useFacilityReport() {
       setRange(next)
       setDraft(next)
       setPage(0)
+      setPeerPage(0)
     }
   }
   const report = !resource.loading && !resource.error ? resource.data : null
+  const mode = selectedMode ?? report?.mode
   const available = report?.moneyAvailability !== 'UNAVAILABLE'
   const amount = (value: string) => (available ? demoVnd(value) : 'Chưa có dữ liệu')
   const stats = report?.summary
@@ -72,6 +83,8 @@ export function useFacilityReport() {
     setDraft,
     page,
     setPage,
+    peerPage,
+    setPeerPage,
     error,
     setError,
     params,
@@ -83,5 +96,11 @@ export function useFacilityReport() {
     stats,
     money,
     timestamp,
+    mode,
+    setMode: (next: 'REAL' | 'DEMO') => {
+      setSelectedMode(next)
+      setPage(0)
+      setPeerPage(0)
+    },
   }
 }

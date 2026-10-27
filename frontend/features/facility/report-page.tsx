@@ -6,6 +6,7 @@ import { ReportFilters } from '@/features/facility/report/report-filters'
 import { ReportKpis } from '@/features/facility/report/report-kpis'
 import { ReportObligations } from '@/features/facility/report/report-obligations'
 import { ReportTransactions } from '@/features/facility/report/report-transactions'
+import { ReportPeer } from '@/features/facility/report/report-peer'
 import { useFacilityReport } from '@/features/facility/report/use-facility-report'
 import Link from 'next/link'
 export function FacilityReport() {
@@ -33,8 +34,13 @@ export function FacilityReport() {
         </div>
       </div>
       <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        Dữ liệu mô phỏng — không phát sinh giao dịch tiền thật. Phí chuyển nhượng thuộc cơ sở;
-        SportHub không hưởng khoản này.
+        {!model.mode
+          ? 'Đang xác định nguồn tiền báo cáo…'
+          : model.mode === 'REAL'
+            ? 'Thu ngân hàng đã xác minh; khoản chi do cơ sở xác nhận thủ công.'
+            : 'Dữ liệu mô phỏng — không phát sinh giao dịch tiền thật.'}{' '}
+        Phí chuyển nhượng của giao dịch cũ thuộc cơ sở. Với chuyển nhượng trực tiếp mới, B trả A; cơ
+        sở và SportHub không thu phí hoặc trả thay A.
       </p>
       <ReportFilters model={model} />
       {resource.loading && (
@@ -64,6 +70,7 @@ export function FacilityReport() {
           )}
           <ReportKpis model={model} />
           <ReportObligations model={model} />
+          <ReportPeer model={model} />
           <section className="rounded-2xl border bg-white p-5">
             <h3 className="mb-4 text-lg font-bold">Khoản thu và hoàn theo ngày</h3>
             {available ? (

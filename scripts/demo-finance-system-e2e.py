@@ -11,6 +11,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 os.environ['SPORTHUB_E2E_TEST_SCRIPT'] = 'demo-finance-e2e.mjs'
+os.environ.setdefault('SPORTHUB_E2E_DEMO_COMPATIBILITY', 'true')
 os.environ.setdefault('SPORTHUB_E2E_ARTIFACT_ROOT', str(ROOT / 'tmp/backend-demo-system'))
 os.environ.setdefault('SPORTHUB_E2E_FRONTEND_ROOT', str(ROOT / 'tmp/demo-system-ui'))
 os.environ.setdefault('SPORTHUB_E2E_OUTPUT', str(ROOT / 'tmp/demo-system-evidence'))

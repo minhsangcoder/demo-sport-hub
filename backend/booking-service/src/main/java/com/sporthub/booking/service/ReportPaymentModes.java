@@ -15,7 +15,15 @@ public class ReportPaymentModes {
   record Modes(
       List<LocalAppliedCollections.Fact> needed,
       Map<UUID, Boolean> values,
-      SortedSet<String> reasons) {}
+      SortedSet<String> reasons,
+      Map<UUID, PaymentProofFacts.Fact> remote) {
+    Modes(
+        List<LocalAppliedCollections.Fact> needed,
+        Map<UUID, Boolean> values,
+        SortedSet<String> reasons) {
+      this(needed, values, reasons, Map.of());
+    }
+  }
 
   private final PaymentEvidenceClient evidence;
 
@@ -24,6 +32,7 @@ public class ReportPaymentModes {
   }
 
   Modes assess(ReportSnapshotReader.Snapshot s, ReportState t) {
+    if (s.mode().equals("REAL")) return real(s, t);
     var byId = t.byId;
     var window = t.window;
     var local = new HashMap<UUID, Map<String, Object>>();
@@ -94,5 +103,69 @@ public class ReportPaymentModes {
     if (remote != null) reasons.addAll(remote.reasons());
 
     return new Modes(needed, modes, reasons);
+  }
+
+  private Modes real(ReportSnapshotReader.Snapshot snapshot, ReportState totals) {
+    var needed = snapshot.applied().facts();
+    var bindings = new LinkedHashMap<UUID, PaymentProofFacts.Binding>();
+    needed.forEach(
+        f ->
+            bindings.put(
+                f.paymentId(),
+                new PaymentProofFacts.Binding(
+                    f.paymentId(), f.bookingId(), f.memberId(), f.purpose())));
+    snapshot
+        .bankCredits()
+        .forEach(
+            c ->
+                bindings.putIfAbsent(
+                    c.paymentId(),
+                    new PaymentProofFacts.Binding(
+                        c.paymentId(), c.bookingId(), c.memberId(), c.purpose())));
+    var remote =
+        bindings.isEmpty()
+            ? new PaymentEvidenceClient.Result(Map.of(), Map.of(), List.of(), List.of(), 0)
+            : evidence.read(List.copyOf(bindings.values()));
+    var reasons = new TreeSet<String>(snapshot.sourceReasons());
+    var values = new HashMap<UUID, Boolean>();
+    if (remote == null) reasons.add("REAL_PAYMENT_FACTS_UNAVAILABLE");
+    else reasons.addAll(remote.reasons());
+    var local = new HashMap<UUID, Map<String, Object>>();
+    snapshot.collections().forEach(c -> local.put((UUID) c.get("payment_id"), c));
+    for (var fact : needed) {
+      var receipt = local.get(fact.paymentId());
+      boolean valid =
+          fact.verified()
+              && receipt != null
+              && fact.fingerprint().equals(receipt.get("fingerprint"))
+              && fact.payerId().equals(receipt.get("payer_id"))
+              && fact.amount().compareTo((BigDecimal) receipt.get("amount")) == 0;
+      if (!valid) reasons.add("REAL_APPLIED_RECEIPT_NEEDS_REVIEW");
+      var source = remote == null ? null : remote.facts().get(fact.paymentId());
+      if (source == null) reasons.add("REAL_PAYMENT_FACTS_UNAVAILABLE");
+      else if (!source.verified()
+          || !source.moneyClass().equals("REAL")
+          || source.realEvidence() == null
+          || !Objects.equals(source.outcomeFingerprint(), fact.fingerprint())
+          || !Objects.equals(source.payerId(), fact.payerId())
+          || !Objects.equals(source.paidAt(), fact.paidAt())
+          || new BigDecimal(source.amount()).compareTo(fact.amount()) != 0) {
+        valid = false;
+        reasons.add("REAL_PAYMENT_SOURCE_DIFFERS");
+      }
+      values.put(fact.paymentId(), valid);
+    }
+    for (var credit : snapshot.bankCredits()) {
+      var source = remote == null ? null : remote.facts().get(credit.paymentId());
+      if (source == null
+          || source.realEvidence() == null
+          || source.realEvidence().bankCredits().stream().noneMatch(c -> c.equals(credit)))
+        reasons.add("REAL_BANK_CREDIT_SOURCE_INCOMPLETE");
+    }
+    for (var booking : snapshot.bookings())
+      if (Set.of("CONFIRMED", "CHECKED_IN", "COMPLETED").contains(booking.status())
+          && !snapshot.applied().assessments().get(booking.id()).fullyPaid())
+        reasons.add("APPLIED_TOTAL_NEEDS_REVIEW");
+    return new Modes(needed, values, reasons, remote == null ? Map.of() : remote.facts());
   }
 }

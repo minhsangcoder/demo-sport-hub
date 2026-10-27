@@ -5,6 +5,7 @@ import { money } from '@/features/schedule/types'
 import { usePricing } from '@/features/schedule/use-pricing'
 import { displayLabel } from '@/lib/display-labels'
 import Link from 'next/link'
+import { FlexiblePolicy } from './flexible-policy'
 export function PricingPage() {
   const model = usePricing()
   const { basePath, error, rules, courts, categories, message, draft } = model
@@ -14,14 +15,16 @@ export function PricingPage() {
         <div>
           <h2 className="text-2xl font-bold">Bảng giá</h2>
           <p className="mt-2 text-sm text-slate-500">
-            Giá mỗi khung giờ theo lịch mở cửa. Quy tắc theo sân hoặc ngày cụ thể được ưu tiên.
+            Đặt giá theo giờ để khách chọn khoảng chơi từ 60 phút đến 4 giờ, theo bước 30 phút. Quy
+            tắc theo sân hoặc ngày cụ thể được ưu tiên. Giá theo khung lịch cũ giữ nguyên đơn vị.
           </p>
         </div>
         <Link className="text-sm text-emerald-700 underline" href={`${basePath}/schedule/preview`}>
           Xem trước giá
         </Link>
       </div>
-      <PricingForm model={model} />
+      <FlexiblePolicy facilityId={model.facility.id} />
+      <PricingForm key={model.editing?.id ?? 'new'} model={model} />
       {(error || rules.error || courts.error || categories.error) && (
         <p role="alert" className="text-red-700">
           {error || rules.error || courts.error || categories.error}

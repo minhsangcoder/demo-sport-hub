@@ -28,7 +28,10 @@ final class ReportTransactions {
         kind,
         direction,
         revenue,
-        cashflow,
+        BookingMoneyCohorts.isReal(b)
+                && Set.of("COURT_COLLECTION", "TRANSFER_COLLECTION").contains(kind)
+            ? false
+            : cashflow,
         counts,
         b.id(),
         b.courtId(),
@@ -38,7 +41,18 @@ final class ReportTransactions {
         state,
         decimal(amount),
         "VND",
-        at);
+        at,
+        BookingMoneyCohorts.isReal(b) ? "REAL" : "DEMO",
+        BookingMoneyCohorts.isReal(b)
+            ? direction.equals("OUT")
+                ? "MANUALLY_RECORDED"
+                : kind.equals("FACILITY_TRANSFER_FEE") ? "HANDOFF_COMMITTED" : "BANK_VERIFIED"
+            : "SIMULATED",
+        kind.equals("BANK_CREDIT")
+            ? "bankTime"
+            : direction.equals("OUT")
+                ? BookingMoneyCohorts.isReal(b) ? "confirmedAt" : "demoExecutionAt"
+                : kind.equals("FACILITY_TRANSFER_FEE") ? "handoffAt" : "paidAt");
   }
 
   static Page page(List<Transaction> transactions, int page, int size) {

@@ -4,6 +4,8 @@ import { Input } from '@/components/ui/input'
 import { type Preview, weekdays } from '@/features/schedule/types'
 import type { usePricing } from '@/features/schedule/use-pricing'
 import { api } from '@/lib/api'
+import { useState } from 'react'
+import { pricingInput } from './pricing-input'
 export function PricingForm({
   model,
 }: {
@@ -41,6 +43,8 @@ export function PricingForm({
     setDraft,
     setEditing,
   } = model
+  const initialUnit = editing?.pricingUnit ?? (editing ? 'LEGACY_SLOT' : 'HOURLY')
+  const [unit, setUnit] = useState(initialUnit)
   return (
     <form
       key={editing?.id ?? 'new'}
@@ -146,14 +150,32 @@ export function PricingForm({
         </label>
       )}
       <label className="grid gap-2 text-sm">
-        Giá mỗi khung giờ (VNĐ)
+        Đơn vị tính giá
+        <select
+          name="pricingUnit"
+          className={selectClass}
+          value={unit}
+          disabled={busy}
+          onChange={(event) => setUnit(event.target.value as 'HOURLY' | 'LEGACY_SLOT')}
+        >
+          <option value="HOURLY">Theo giờ, tính theo số phút sử dụng</option>
+          <option value="LEGACY_SLOT">Theo khung lịch cũ</option>
+        </select>
+      </label>
+      <label className="grid gap-2 text-sm">
+        {unit === 'HOURLY' ? 'Giá theo giờ (đồng/giờ)' : 'Giá theo khung lịch cũ (đồng/khung)'}
         <Input
+          key={unit}
           name="price"
-          defaultValue={editing?.pricePerSlot ?? undefined}
+          defaultValue={
+            unit === initialUnit
+              ? ((unit === 'HOURLY' ? editing?.pricePerHour : editing?.pricePerSlot) ?? undefined)
+              : undefined
+          }
           type="number"
-          min={0.01}
-          max={9999999999.99}
-          step={0.01}
+          min={unit === 'HOURLY' ? 1 : 0.01}
+          max={unit === 'HOURLY' ? 9999999999 : 9999999999.99}
+          step={unit === 'HOURLY' ? 1 : 0.01}
           required
           disabled={busy}
         />
@@ -241,6 +263,13 @@ export function PricingForm({
             setError('Chọn ngày xem dự thảo.')
             return
           }
+          let rule
+          try {
+            rule = pricingInput(f, dateMode)
+          } catch (failure) {
+            setError(failure instanceof Error ? failure.message : 'Kiểm tra lại bảng giá.')
+            return
+          }
           setBusy(true)
           setError('')
           void api<Preview>(`/schedules/facilities/${facility.id}/preview/pricing`, {
@@ -249,21 +278,7 @@ export function PricingForm({
               courtId: value('previewCourt'),
               date: value('previewDate'),
               replacesRuleId: editing?.id,
-              rule: {
-                courtId: value('courtId') || null,
-                sportCategoryId: value('sportCategoryId') || null,
-                courtTypeId: value('courtTypeId') || null,
-                dayOfWeek: dateMode ? null : Number(value('dayOfWeek')),
-                specificDate: dateMode ? value('specificDate') : null,
-                startsAt: value('startsAt'),
-                endsAt: value('endsAt'),
-                pricePerSlot: Number(value('price')),
-                priority: Number(value('priority')),
-                label: value('label'),
-                effectiveFrom: value('effectiveFrom'),
-                effectiveTo: value('effectiveTo') || null,
-                currency: 'VND',
-              },
+              rule,
             }),
           })
             .then(setDraft)

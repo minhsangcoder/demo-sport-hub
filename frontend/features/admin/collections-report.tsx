@@ -22,8 +22,8 @@ export function CollectionsReport() {
     <Card title="Thanh toán thành công theo thời điểm trả tiền">
       <Status loading={r.loading || facilities.loading} error={r.error || facilities.error} />
       <p className="text-sm text-amber-800">
-        Các khoản thanh toán mô phỏng thành công theo ngày trả tiền. Doanh thu và nghĩa vụ trả/hoàn
-        thuộc từng cơ sở; xem phần giám sát ở trên hoặc báo cáo của cơ sở.
+        Thống kê các khoản thanh toán ứng dụng theo nguồn, gồm lịch sử mô phỏng. Doanh thu và nghĩa
+        vụ trả/hoàn thuộc từng cơ sở; xem phần giám sát ở trên hoặc báo cáo của cơ sở.
       </p>
       {r.data?.collections.map((x, i) => (
         <p key={i}>

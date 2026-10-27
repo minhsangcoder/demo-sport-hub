@@ -24,6 +24,18 @@ public class GlobalExceptionHandler {
 
     private static final String CORRELATION_ID_HEADER = "X-Correlation-Id";
 
+    @ExceptionHandler(ActionPolicyException.class)
+    public ResponseEntity<ErrorResponse> handlePolicy(ActionPolicyException ex, HttpServletRequest request) {
+        var headers = new org.springframework.http.HttpHeaders();
+        if(ex.details().get("retryAt") instanceof java.time.Instant at) {
+            long seconds = Math.max(1, java.time.Duration.between(java.time.Instant.now(), at).toSeconds());
+            headers.set("Retry-After", Long.toString(seconds));
+        }
+        return ResponseEntity.status(ex.status()).headers(headers).body(ErrorResponse.builder()
+            .status(ex.status()).code(ex.code()).message(ex.getMessage())
+            .traceId(request.getHeader(CORRELATION_ID_HEADER)).details(ex.details()).build());
+    }
+
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleResourceNotFound(
             ResourceNotFoundException ex, HttpServletRequest request) {
@@ -114,6 +126,13 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleInvalidArgument(IllegalArgumentException ex, HttpServletRequest request) {
         return response(HttpStatus.BAD_REQUEST, ErrorCode.VALIDATION_ERROR, ex.getMessage(), request, null, null);
+    }
+
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleUnreadableBody(
+            org.springframework.http.converter.HttpMessageNotReadableException ex, HttpServletRequest request) {
+        return response(HttpStatus.BAD_REQUEST, ErrorCode.VALIDATION_ERROR,
+                "Thông tin gửi lên không đúng định dạng hoặc có trường không được phép.", request, null, null);
     }
 
     @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)

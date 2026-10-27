@@ -1,6 +1,6 @@
 'use client'
 import { Button } from '@/components/ui/button'
-import { FacilityDemoMoneyPanel } from '@/features/booking/demo-finance'
+import { FacilityMoneyPanel } from '@/features/booking/finance-panels'
 import { CounterPaymentModal } from '@/features/operations/counter-payment-modal'
 import { OperationCards } from '@/features/operations/operation-cards'
 import { OperationFilters } from '@/features/operations/operation-filters'
@@ -77,10 +77,7 @@ export function Loaded({ owner }: { owner: boolean }) {
         </Button>
       </div>
       {facilityId && (can('BOOKING_REFUND') || can('TRANSFER_PAYOUT')) && (
-        <FacilityDemoMoneyPanel
-          facilityId={facilityId}
-          canReadBooking={Boolean(can('BOOKING_READ'))}
-        />
+        <FacilityMoneyPanel facilityId={facilityId} canReadBooking={Boolean(can('BOOKING_READ'))} />
       )}
       <QuickQrCheckinModal
         isOpen={quickQrOpen}

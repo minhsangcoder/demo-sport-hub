@@ -47,7 +47,7 @@ final class ReportMoney {
       }
     var purchaseIds = new HashSet<UUID>();
     for (var row : s.collections())
-      if (row.get("purpose").equals("TRANSFER")) {
+      if (!s.mode().equals("REAL") && row.get("purpose").equals("TRANSFER")) {
         UUID payment = (UUID) row.get("payment_id");
         Instant paid = instant(row.get("paid_at"));
         purchaseIds.add(payment);
@@ -105,7 +105,7 @@ final class ReportMoney {
       }
       UUID payment = (UUID) row.get("payment_id");
       Instant purchasePaid = instant(row.get("purchase_paid_at"));
-      if (!purchaseIds.contains(payment) && in(purchasePaid, window)) {
+      if (!s.mode().equals("REAL") && !purchaseIds.contains(payment) && in(purchasePaid, window)) {
         var amount = (BigDecimal) row.get("amount");
         summary.p = summary.p.add(amount);
         c.p = c.p.add(amount);
@@ -171,5 +171,6 @@ final class ReportMoney {
               amount,
               at));
     }
+    if (s.mode().equals("REAL")) RealReportCash.add(s, t, assessed);
   }
 }

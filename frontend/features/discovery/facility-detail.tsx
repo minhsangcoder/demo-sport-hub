@@ -7,7 +7,6 @@ import { useApi } from '@/lib/use-api'
 import { useAuth } from '@/lib/auth-context'
 import { FavoriteButton } from '@/features/integration/favorites'
 import type { Facility, Court, Media, Category } from '@/features/facility/types'
-import { refundBpsToPercent, type RefundPolicy } from '@/features/facility/refund-policy'
 import type { Booking } from '@/features/booking/types'
 import { DirectionsCard } from './directions-card'
 
@@ -16,7 +15,6 @@ export function PublicFacilityDetail({ id }: { id: string }) {
   const courts = useApi<Court[]>(`/facilities/${id}/courts?includeDisabled=true`)
   const images = useApi<Media[]>(`/facilities/${id}/images`)
   const categories = useApi<Category[]>('/sport-categories')
-  const refundPolicy = useApi<RefundPolicy>(`/facilities/${id}/refund-policy`)
 
   const { user } = useAuth()
   const bookingsRes = useApi<Booking[]>(user ? '/bookings' : null)
@@ -137,19 +135,6 @@ export function PublicFacilityDetail({ id }: { id: string }) {
           <p className="mt-2 text-sm text-slate-500">
             Lịch và giờ chơi theo {timezoneLabel(f.timezone)}.
           </p>
-          {refundPolicy.data?.configured && refundPolicy.data.rateBps != null && (
-            <div className="mt-4 border-t border-slate-200 pt-3">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Chính sách sang nhượng sân
-              </h4>
-              <p className="mt-1 text-sm font-semibold text-emerald-800">
-                Tỉ lệ hoàn tiền: <strong className="text-base font-bold">{refundBpsToPercent(refundPolicy.data.rateBps)}%</strong>
-              </p>
-              <p className="mt-1 text-xs text-slate-500">
-                Áp dụng cho người mua lại lượt đặt qua chuyển nhượng khi hủy hợp lệ trước giờ chơi.
-              </p>
-            </div>
-          )}
         </aside>
       </div>
 
@@ -179,11 +164,6 @@ export function PublicFacilityDetail({ id }: { id: string }) {
                 <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
                   {categories.data?.find((v) => v.id === c.sportCategoryId)?.name || 'Sân thể thao'}
                 </p>
-                {refundPolicy.data?.configured && refundPolicy.data.rateBps != null && (
-                  <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
-                    Hoàn {refundBpsToPercent(refundPolicy.data.rateBps)}% khi sang nhượng
-                  </span>
-                )}
               </div>
               <h3 className="mt-2 text-xl font-bold">{c.name}</h3>
               <p className="mt-2 text-sm text-slate-500">{c.description || c.code}</p>
@@ -191,16 +171,6 @@ export function PublicFacilityDetail({ id }: { id: string }) {
             </div>
             {c.enabled && (
               <div className="mt-5 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
-                {refundPolicy.data?.configured && refundPolicy.data.rateBps != null ? (
-                  <span className="text-xs text-slate-500">
-                    Tỉ lệ hoàn sang nhượng:{' '}
-                    <strong className="font-bold text-emerald-700">
-                      {refundBpsToPercent(refundPolicy.data.rateBps)}%
-                    </strong>
-                  </span>
-                ) : (
-                  <span />
-                )}
                 <Link
                   href={`/facilities/${id}/courts/${c.id}`}
                   className="inline-flex rounded-full bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-700"

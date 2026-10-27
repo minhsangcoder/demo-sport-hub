@@ -22,8 +22,15 @@ public class ReliableOutbox {
         this.jdbc=jdbc;this.json=json;this.rabbit=rabbit;tx=new TransactionTemplate(manager);
     }
     public void record(String exchange,DomainEvent<?> event) {
-        try {jdbc.update("INSERT INTO event_outbox(event_id,exchange,routing_key,body) VALUES(?,?,?,?::jsonb)",event.eventId(),exchange,event.eventType(),json.writeValueAsString(event));}
+        enqueue(jdbc,json,exchange,event);
+    }
+    /** Persist independently of whether the optional publisher is enabled on this process. */
+    public static void enqueue(JdbcTemplate jdbc,ObjectMapper json,String exchange,DomainEvent<?> event) {
+        try {enqueue(jdbc,exchange,event,json.writeValueAsString(event));}
         catch(com.fasterxml.jackson.core.JsonProcessingException ex) {throw new IllegalStateException("Could not serialize domain event",ex);}
+    }
+    public static void enqueue(JdbcTemplate jdbc,String exchange,DomainEvent<?> event,String serialized) {
+        jdbc.update("INSERT INTO event_outbox(event_id,exchange,routing_key,body) VALUES(?,?,?,?::jsonb)",event.eventId(),exchange,event.eventType(),serialized);
     }
     @Scheduled(fixedDelayString="${sporthub.events.outbox.delay-ms:1000}",initialDelayString="${sporthub.events.outbox.delay-ms:1000}")
     public void publishPending() {

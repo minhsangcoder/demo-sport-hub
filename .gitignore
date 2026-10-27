@@ -12,7 +12,7 @@
 
 # OpenAPI schemas are Backend source required by the API generation scripts.
 
-# Technical documents, reports and AI instructions stay local, even inside source trees.
+# Technical documents stay local except the shared AI/spec rules allowed below.
 **/docs/
 **/*.md
 !/README.md
@@ -114,3 +114,32 @@ logs/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Shared proposal authority must travel with source across IDEs/checkouts.
+!/AGENTS.md
+!/GEMINI.md
+!/openspec/
+/openspec/*
+!/openspec/CURRENT_CHANGE.md
+!/openspec/config.yaml
+!/openspec/changes/
+!/openspec/specs/
+!/openspec/changes/**/*.md
+!/openspec/changes/**/.openspec.yaml
+!/openspec/specs/**/*.md
+!/.cursor/
+/.cursor/*
+!/.cursor/rules/
+/.cursor/rules/*
+!/.cursor/rules/latest-proposal.mdc
+!/.agents/
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/openspec-*/
+!/.agents/skills/ponytail*/
+!/.agents/skills/openspec-*/SKILL.md
+!/.agents/skills/ponytail*/SKILL.md
+!/.agents/rules/
+/.agents/rules/*
+!/.agents/rules/latest-proposal.md

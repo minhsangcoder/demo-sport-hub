@@ -53,7 +53,7 @@ public class PricingEngine {
         return id==null||(scopeMatches(a,court.apply(id))&&scopeMatches(b,court.apply(id)));
     }
     public boolean conflict(PriceRule a,PriceRule b,java.util.function.Function<UUID,FacilityClient.Context> court) {
-        return a.active()&&b.active()&&a.priority()==b.priority()
+        return a.active()&&b.active()&&Objects.equals(a.pricingUnit(),b.pricingUnit())&&a.priority()==b.priority()
             &&(sameScope(a,b)||rank(a).equals(rank(b)))
             &&a.startsAt().isBefore(b.endsAt())&&a.endsAt().isAfter(b.startsAt())
             &&datesOverlap(a,b)&&scopeMayIntersect(a,b,court);

@@ -4,9 +4,9 @@ $ErrorActionPreference='Stop'
 if($TestsOnly -and $SkipTests){throw 'TestsOnly and SkipTests are mutually exclusive.'}
 $demoRoot=(Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 if($StopDemoServices){
- $demoBackendRoot=Join-Path $demoRoot 'backend'
- $demoProcesses=Get-CimInstance Win32_Process -Filter "name='java.exe'" | Where-Object { $_.CommandLine -like "*$demoBackendRoot*\target\*-0.0.1-SNAPSHOT.jar*" }
- foreach($demoProcess in $demoProcesses){[System.Diagnostics.Process]::GetProcessById([int]$demoProcess.ProcessId).Kill()}
+ $demoJarPaths=@('identity-service','facility-service','schedule-service','booking-service','payment-service','transfer-service','api-gateway') | ForEach-Object {Join-Path $demoRoot "backend/$_/target/$_-0.0.1-SNAPSHOT.jar"}
+ $demoProcesses=Get-CimInstance Win32_Process -Filter "name='java.exe'" | Where-Object { $demoCommandLine=$_.CommandLine; $demoCommandLine -and @($demoJarPaths | Where-Object {$demoCommandLine.Contains($_)}).Count -gt 0 }
+ foreach($demoProcess in $demoProcesses){Stop-Process -Id $demoProcess.ProcessId -Force -ErrorAction SilentlyContinue}
 }
 if($UseExternalTestDatabase){
  if(!$env:SPORTHUB_TEST_DB_USER -or !$env:SPORTHUB_TEST_DB_PASSWORD){throw 'Set SPORTHUB_TEST_DB_USER and SPORTHUB_TEST_DB_PASSWORD for the dedicated test container.'}

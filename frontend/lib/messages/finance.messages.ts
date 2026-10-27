@@ -37,7 +37,7 @@ export const financeMessages: Record<string, string> = {
   'Facility refund policy does not support the quoted currency':
     'Chính sách hoàn của cơ sở không hỗ trợ loại tiền trong báo giá.',
   'Review a cancellation quote and use cancel-with-policy for this booking':
-    'Vui lòng xem khoản được hoàn và xác nhận hủy theo chính sách.',
+    'Lượt đặt nhận qua chuyển nhượng không áp dụng hoàn tiền khi tự hủy.',
   'Booking already has an immutable refund policy':
     'Lượt đặt đã có chính sách hoàn được chốt và không thể thay đổi.',
   'Review the current policy before proposing adoption':
@@ -114,7 +114,7 @@ export const financeMessages: Record<string, string> = {
   'BLOCKED_RULE: paid group ownership changes need an approved member policy':
     'Chưa thể chuyển nhượng lượt đặt nhóm khi chưa có chính sách thành viên phù hợp.',
   'BLOCKED_RULE: facility paid cancellation requires the 100% refund execution/reconciliation protocol':
-    'Cần hoàn tất quy trình hoàn tiền và đối soát của cơ sở trước khi hủy lượt đặt đã thanh toán.',
+    'Lượt đặt đã nhận tiền không hỗ trợ hủy trực tiếp. Liên hệ cơ sở để xử lý yêu cầu hợp lệ.',
   'Booking not found': 'Không tìm thấy lượt đặt sân.',
   'Payment not found': 'Không tìm thấy giao dịch thanh toán.',
   'Listing not found': 'Không tìm thấy tin chuyển nhượng.',

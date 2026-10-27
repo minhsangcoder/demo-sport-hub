@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const phase = process.argv[2]
 if (!/^(before|after|candidate(?:-[a-z0-9-]+)?)$/.test(phase ?? '')) throw new Error('Usage: node scripts/performance/prepare.mjs before|after|candidate[-name]')
-const target = path.join(root, 'tmp', 'loading-performance', phase)
+const target = path.join(path.resolve(root, process.env.SPORTHUB_PERFORMANCE_HOME || 'tmp/loading-performance'), phase)
 if (existsSync(target)) throw new Error(`Snapshot already exists: ${target}. Preserve it and choose a fresh run directory.`)
 const files = []
 function inventory(folder, relative = '') {

@@ -187,11 +187,17 @@
     "features/groups/invite-page.tsx",
     "features/groups/payment-tracking.tsx",
     "features/groups/split-page.tsx",
-    "features/groups/types.ts"
+    "features/groups/types.ts",
+    "features/operations/counter-payment.ts",
+    "features/facility/payos-channel-page.tsx",
+    "features/admin/real-money-monitor.tsx",
+    "features/booking/finance-panels.tsx",
+    "app/owner/facilities/[facilityId]/payment-channel/page.tsx"
   ],
   "directories": [
     "features/auth",
     "features/home",
-    "lib/messages"
+    "lib/messages",
+    "features/payments"
   ]
 }

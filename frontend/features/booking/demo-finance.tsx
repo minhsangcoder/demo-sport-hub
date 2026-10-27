@@ -371,12 +371,11 @@ export function PolicyCancellationPanel({
   return (
     <section className="mt-5 space-y-3 rounded-xl border border-rose-200 p-4">
       <h3 className="font-semibold text-rose-800">
-        Hủy theo chính sách cơ sở (Người mua chuyển nhượng)
+        Hủy và hoàn tiền tại cơ sở
       </h3>
       <p className="text-sm text-slate-600">
-        Dành cho người mua lại qua chuyển nhượng: Bạn được hoàn tiền theo tỷ lệ chính sách của cơ sở
-        tính trên số tiền bạn đã mua lại. Chủ cơ sở hoặc nhân viên được cấp quyền sẽ duyệt và hoàn
-        tiền.
+        Dành cho chủ cơ sở hoặc nhân viên có quyền xử lý hoàn tiền vận hành. Không áp dụng cho
+        lượt đặt đã chuyển nhượng.
       </p>
       <Button variant="outline" onClick={preview} disabled={busy}>
         Xem khoản hoàn khi hủy
@@ -384,7 +383,7 @@ export function PolicyCancellationPanel({
       {quote && (
         <div className="space-y-3">
           <p className="text-sm">
-            Số tiền bạn đã mua lại: <strong>{demoVnd(quote.baseAmount)}</strong> · tỷ lệ hoàn{' '}
+            Số tiền làm căn cứ hoàn: <strong>{demoVnd(quote.baseAmount)}</strong> · tỷ lệ hoàn{' '}
             {(quote.rateBps / 100).toLocaleString('vi-VN')}% · được hoàn:{' '}
             <strong className="text-emerald-700">{demoVnd(quote.targetAmount)}</strong>.
           </p>

@@ -24,6 +24,7 @@ public class BookingCreation {
   private final BookingIdempotency keys;
   private final BookingReads reads;
   private final BookingHolds holds;
+  private final BookingMoneyCohorts money;
 
   public BookingCreation(
       BookingRepository repo,
@@ -33,7 +34,8 @@ public class BookingCreation {
       BookingRefundPolicies refundPolicies,
       BookingIdempotency keys,
       BookingReads reads,
-      BookingHolds holds) {
+      BookingHolds holds,
+      BookingMoneyCohorts money) {
     this.repo = repo;
     this.dependencies = dependencies;
     this.clock = clock;
@@ -42,14 +44,47 @@ public class BookingCreation {
     this.keys = keys;
     this.reads = reads;
     this.holds = holds;
+    this.money = money;
   }
 
   @Transactional
   public Booking create(
       CreateInput input, String key, Caller caller, String token, boolean counter) {
     keys.checkKey(key);
-    repo.lock(caller.id());
     String fingerprint = Signatures.sha256(repo.write(input) + "|" + counter);
+    UUID previous = keys.idempotent(caller.id(), "BOOKING", key, fingerprint);
+    if (previous != null) return replay(previous, caller, token, counter);
+    UUID linkedCustomer = null;
+    if (counter) {
+      if (input.guestName() == null
+          || input.guestName().isBlank()
+          || input.guestPhone() == null
+          || !input.guestPhone().matches("\\+?[0-9]{8,15}"))
+        throw new IllegalArgumentException("Guest name and phone are required");
+      var hold = repo.hold(input.holdId());
+      dependencies.facilityPermission(hold.facilityId(), caller, token, "BOOKING_CREATE_COUNTER");
+      linkedCustomer = dependencies.counterCustomer(hold.facilityId(), input.guestPhone(), token);
+    }
+    BookingUserFence.lock(repo, caller.id(), linkedCustomer);
+    return createLocked(input, key, caller, token, counter, linkedCustomer, fingerprint);
+  }
+
+  private Booking replay(UUID previous, Caller caller, String token, boolean counter) {
+    var old = repo.find(previous);
+    if (counter)
+      dependencies.facilityPermission(old.facilityId(), caller, token, "BOOKING_CREATE_COUNTER");
+    else caller.requireRole("CUSTOMER");
+    return reads.replayView(old, caller);
+  }
+
+  private Booking createLocked(
+      CreateInput input,
+      String key,
+      Caller caller,
+      String token,
+      boolean counter,
+      UUID linkedCustomer,
+      String fingerprint) {
     UUID previous = keys.idempotent(caller.id(), "BOOKING", key, fingerprint);
     if (previous != null) {
       var old = repo.find(previous);
@@ -60,6 +95,9 @@ public class BookingCreation {
     }
     var h = holds.ownHold(input.holdId(), caller, token);
     repo.lock(h.courtId());
+    String channel = h.quote().path("admissionChannel").asText();
+    if (!channel.isBlank() && !channel.equals(counter ? "COUNTER" : "ONLINE"))
+      throw new ConflictException("Lượt giữ chỗ không thuộc luồng đặt sân này.");
     if (repo.jdbc()
             .queryForObject(
                 "SELECT count(*) FROM bookings WHERE reservation_id=?", Integer.class, h.id())
@@ -87,11 +125,19 @@ public class BookingCreation {
     var live =
         dependencies.quote(
             new HoldInput(
-                h.courtId(), h.startsAt(), h.endsAt(), h.quote().path("amount").decimalValue()));
+                h.courtId(),
+                h.startsAt(),
+                h.endsAt(),
+                h.quote().path("amount").decimalValue(),
+                h.quote().path("quoteHash").asText(null)));
     holds.validateQuote(
         live,
         new HoldInput(
-            h.courtId(), h.startsAt(), h.endsAt(), h.quote().path("amount").decimalValue()));
+            h.courtId(),
+            h.startsAt(),
+            h.endsAt(),
+            h.quote().path("amount").decimalValue(),
+            h.quote().path("quoteHash").asText(null)));
     if (!h.expiresAt().isAfter(clock.instant()))
       throw new ConflictException("Hold expired during price validation");
     if (!h.facilityId().toString().equals(live.path("facilityId").asText())
@@ -100,8 +146,6 @@ public class BookingCreation {
     if (!h.quote().path("currency").asText().equals(live.path("currency").asText())
         || live.path("amount").decimalValue().compareTo(h.quote().path("amount").decimalValue())
             != 0) throw new ConflictException("Price changed. Review price and create a new hold");
-    UUID linkedCustomer =
-        counter ? dependencies.counterCustomer(h.facilityId(), input.guestPhone(), token) : null;
     if (counter)
       dependencies.facilityPermission(h.facilityId(), caller, token, "BOOKING_CREATE_COUNTER");
     if (!h.expiresAt().isAfter(clock.instant()))
@@ -109,6 +153,7 @@ public class BookingCreation {
     UUID holder = counter ? linkedCustomer : caller.id();
     live = live.deepCopy();
     ((ObjectNode) live).set("refundPolicy", refundPolicy.deepCopy());
+    money.copyAccepted((ObjectNode) live, h.quote());
     UUID id = UUID.randomUUID();
     repo.auditContext(caller.id(), counter ? "COUNTER_API" : "BOOKING_API");
     repo.jdbc()
@@ -136,16 +181,25 @@ public class BookingCreation {
       repo.jdbc()
           .update(
               "INSERT INTO"
-                  + " counter_booking_guests(booking_id,operator_id,linked_customer_id,guest_name,guest_phone)"
-                  + " VALUES(?,?,?,?,?)",
+                  + " counter_booking_guests(booking_id,operator_id,linked_customer_id,guest_name,guest_phone,payment_capability)"
+                  + " VALUES(?,?,?,?,?,?)",
               id,
               caller.id(),
               linkedCustomer,
               input.guestName().trim(),
-              input.guestPhone());
+              input.guestPhone(),
+              money.live() ? "BANK_QR" : "DEMO_ONLY");
       repo.jdbc().update("UPDATE slot_reservations SET holder_id=? WHERE id=?", holder, h.id());
     }
     refundPolicies.store(repo.find(id), refundPolicy, caller.id());
+    money.store(repo.find(id));
+    repo.jdbc()
+        .update(
+            "UPDATE user_hold_claims SET phase='BOOKING_PENDING',expires_at=?,updated_at=? WHERE"
+                + " source_id=? AND state='ACTIVE'",
+            Timestamp.from(h.expiresAt()),
+            Timestamp.from(clock.instant()),
+            h.id());
     repo.history(
         id,
         caller.id(),
@@ -163,11 +217,12 @@ public class BookingCreation {
         || input.guestPhone() == null
         || !input.guestPhone().matches("\\+?[0-9]{8,15}"))
       throw new IllegalArgumentException("Guest name and phone are required");
-    if (input.paymentMethod() != null && !input.paymentMethod().equals("DEMO"))
+    if (money.live()
+        ? !"BANK_QR".equals(input.paymentMethod())
+        : input.paymentMethod() != null && !input.paymentMethod().equals("DEMO"))
       throw new ConflictException(
-          "BLOCKED_RULE: cash/POS collection or a real provider is not configured");
+          "Chọn phương thức QR ngân hàng ở chế độ REAL hoặc mô phỏng ở chế độ DEMO.");
     keys.checkKey(key);
-    repo.lock(caller.id());
     String fingerprint =
         Signatures.sha256(
             repo.write(
@@ -179,29 +234,51 @@ public class BookingCreation {
                     input.guestName().trim(),
                     input.guestPhone(),
                     input.paymentMethod(),
-                    input.refundPolicyHash())));
+                    input.refundPolicyHash(),
+                    input.quoteHash())));
     UUID previous = keys.idempotent(caller.id(), "COUNTER_BOOKING", key, fingerprint);
     if (previous != null) {
       var b = repo.find(previous);
       dependencies.facilityPermission(b.facilityId(), caller, token, "BOOKING_CREATE_COUNTER");
       return reads.replayView(b, caller);
     }
+    var initial =
+        dependencies.quote(
+            new HoldInput(
+                input.courtId(),
+                input.startsAt(),
+                input.endsAt(),
+                input.expectedAmount(),
+                input.quoteHash()));
+    UUID facility = UUID.fromString(initial.path("facilityId").asText());
+    dependencies.facilityPermission(facility, caller, token, "BOOKING_CREATE_COUNTER");
+    UUID linkedCustomer = dependencies.counterCustomer(facility, input.guestPhone(), token);
+    BookingUserFence.lock(repo, caller.id(), linkedCustomer);
+    previous = keys.idempotent(caller.id(), "COUNTER_BOOKING", key, fingerprint);
+    if (previous != null) return replay(previous, caller, token, true);
     var hold =
         holds.hold(
             new HoldInput(
-                input.courtId(), input.startsAt(), input.endsAt(), input.expectedAmount()),
+                input.courtId(),
+                input.startsAt(),
+                input.endsAt(),
+                input.expectedAmount(),
+                input.quoteHash()),
             "counter-hold-" + Signatures.sha256(key),
             caller,
             token,
             true);
     refundPolicies.requireExpectedPolicy(hold.quote(), hold.facilityId(), input.refundPolicyHash());
+    var createInput = new CreateInput(hold.id(), input.guestName().trim(), input.guestPhone());
     var booking =
-        create(
-            new CreateInput(hold.id(), input.guestName().trim(), input.guestPhone()),
+        createLocked(
+            createInput,
             "counter-create-" + Signatures.sha256(key),
             caller,
             token,
-            true);
+            true,
+            linkedCustomer,
+            Signatures.sha256(repo.write(createInput) + "|true"));
     keys.remember(caller.id(), "COUNTER_BOOKING", key, fingerprint, booking.id());
     return reads.projectEffective(booking);
   }

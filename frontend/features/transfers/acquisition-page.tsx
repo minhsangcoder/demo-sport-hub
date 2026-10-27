@@ -1,8 +1,10 @@
 'use client'
 import Link from 'next/link'
-import { useEffect, useRef, useState } from 'react'
+import dynamic from 'next/dynamic'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { api } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
+import { usePolling } from '@/lib/use-polling'
 import { useApi } from '@/lib/use-api'
 import { RequireAuth } from '@/features/auth/require-auth'
 import { Button } from '@/components/ui/button'
@@ -12,11 +14,20 @@ import type { Payment } from '@/features/booking/types'
 import { TransferSynchronization } from './transfer-synchronization'
 import { type Acquisition, transferStates } from './types'
 import { TransferFinanceNotice } from './finance-notice'
-import { ParticipantDemoMoney } from '@/features/booking/demo-finance'
+import { ParticipantMoney } from '@/features/booking/finance-panels'
+import { useAuth } from '@/lib/auth-context'
+const PeerAcquisitionPage = dynamic(() => import('./peer-acquisition'), {
+  loading: () => (
+    <p role="status" className="p-8">
+      Đang mở giao dịch trực tiếp…
+    </p>
+  ),
+})
 export function AcquisitionPage({ id }: { id: string }) {
+  const { user } = useAuth()
   return (
     <RequireAuth roles={['CUSTOMER']}>
-      <Loaded id={id} />
+      <Loaded key={`${user?.id}:${id}`} id={id} />
     </RequireAuth>
   )
 }
@@ -25,13 +36,43 @@ function Loaded({ id }: { id: string }) {
   const r = useApi<Acquisition>(`/transfers/acquisitions/${id}`)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const remaining = useRemaining(r.data?.expiresAt)
+  const [observed, setObserved] = useState<{ id: string; value: Acquisition } | null>(null)
+  const [pollingStopped, setPollingStopped] = useState(false)
+  const current = observed?.id === id ? observed.value : r.data
+  const remaining = useRemaining(current?.expiresAt)
   const payKey = useRef<string | null>(null)
-  useEffect(() => {
-    if (!r.data || !['PENDING', 'PENDING_HANDOFF'].includes(r.data.state)) return
-    const timer = setInterval(r.reload, 2000)
-    return () => clearInterval(timer)
-  }, [r.data, r.reload])
+  usePolling(
+    async (signal) => {
+      try {
+        const value = await api<Acquisition>(`/transfers/acquisitions/${id}`, { signal })
+        if (signal.aborted) return
+        setObserved({ id, value })
+        if (!['PENDING', 'PENDING_HANDOFF', 'PENDING_AUDIT'].includes(value.state)) return false
+      } catch (failure) {
+        if (signal.aborted) return
+        if (failure instanceof ApiError && [401, 403].includes(failure.status)) {
+          setPollingStopped(true)
+          return false
+        }
+        setError(failure instanceof Error ? failure.message : 'Chưa tải được tiến độ bàn giao.')
+      }
+    },
+    {
+      enabled:
+        !pollingStopped &&
+        current?.protocol !== 'PEER_RESALE_V1' &&
+        Boolean(current && ['PENDING', 'PENDING_HANDOFF', 'PENDING_AUDIT'].includes(current.state)),
+      scope: id,
+      interval: 4000,
+      deadline: current ? Date.parse(current.expiresAt) + 10 * 60_000 : undefined,
+      onTimeout: () => {
+        setPollingStopped(true)
+        setError(
+          'Đã dừng theo dõi tại màn hình. Tải lại giao dịch để xem kết quả đối soát; không thanh toán lại khi chưa rõ kết quả.',
+        )
+      },
+    },
+  )
   async function pay() {
     if (!r.data || busy) return
     setBusy(true)
@@ -68,7 +109,7 @@ function Loaded({ id }: { id: string }) {
       setBusy(false)
     }
   }
-  if (r.loading)
+  if (r.loading && !r.data)
     return (
       <p role="status" className="p-8">
         Đang tải giao dịch…
@@ -83,7 +124,8 @@ function Loaded({ id }: { id: string }) {
         </button>
       </p>
     )
-  const a = r.data
+  const a = current ?? r.data
+  if (a.protocol === 'PEER_RESALE_V1') return <PeerAcquisitionPage id={id} />
   return (
     <div className="mx-auto max-w-xl px-5 py-10">
       <Link href="/customer/transfers" className="text-sm text-slate-500">
@@ -123,8 +165,8 @@ function Loaded({ id }: { id: string }) {
       )}
       {a.state === 'PENDING_HANDOFF' && (
         <p role="status" className="mt-6 rounded-xl bg-emerald-50 p-5 text-emerald-800">
-          Thanh toán mô phỏng thành công. Đang bàn giao quyền sử dụng và mã xác nhận vào sân; không
-          chờ cơ sở trả người bán…
+          Đã xác nhận thanh toán. Đang bàn giao quyền sử dụng và mã xác nhận vào sân; không chờ cơ
+          sở trả người bán…
         </p>
       )}
       {a.state === 'SUCCESS' && (
@@ -138,7 +180,7 @@ function Loaded({ id }: { id: string }) {
       {['PENDING_HANDOFF', 'PENDING_AUDIT', 'SUCCESS'].includes(a.state) && (
         <TransferSynchronization id={a.listingId} />
       )}
-      <ParticipantDemoMoney bookingId={a.bookingId} />
+      <ParticipantMoney bookingId={a.bookingId} moneyClass={a.financeTerms?.mode} />
       {a.state === 'PENDING_AUDIT' && (
         <p className="mt-6 rounded-xl bg-amber-50 p-5 text-sm text-amber-900">
           Giao dịch đang đối soát. Quyền sử dụng chỉ được cấp sau khi bàn giao thành công.

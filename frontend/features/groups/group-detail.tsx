@@ -3,28 +3,25 @@
 import { Button } from '@/components/ui/button'
 import { RequireAuth } from '@/features/auth/require-auth'
 import { Countdown } from '@/features/booking/countdown'
-import { ParticipantDemoMoney,PolicyCancellationPanel } from '@/features/booking/demo-finance'
+import { ParticipantMoney } from '@/features/booking/finance-panels'
 import { RefundPolicyNotice } from '@/features/booking/refund-policy-notice'
 import type { Payment } from '@/features/booking/types'
-import type { Court,Facility } from '@/features/facility/types'
+import type { Court, Facility } from '@/features/facility/types'
 import { money } from '@/features/schedule/types'
 import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth-context'
 import { useApi } from '@/lib/use-api'
-import {
-Check,
-EyeOff,
-RotateCcw,
-Trash2
-} from 'lucide-react'
+import { Check, EyeOff, RotateCcw, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect,useState } from 'react'
+import { useState } from 'react'
+import { usePolling } from '@/lib/use-polling'
 import { DeleteGroupDialog } from './delete-group-dialog'
 import { GroupExtras } from './group-extras'
 import { useHiddenGroups } from './hidden-groups'
 import { GroupPaymentTracking } from './payment-tracking'
-import { type Group,groupStates } from './types'
+import { GroupPaymentSetup } from './payment-setup'
+import { type Group, groupStates } from './types'
 
 export function GroupDetail({ id }: { id: string }) {
   return (
@@ -47,27 +44,24 @@ function Loaded({ id }: { id: string }) {
   const { hide, unhide, isGroupHidden } = useHiddenGroups(user?.id)
   const hidden = isGroupHidden(id)
 
-  const facility = useApi<Facility>(
-    r.data ? `/facilities/${r.data.booking.facilityId}` : null
-  )
-  const courts = useApi<Court[]>(
-    r.data ? `/facilities/${r.data.booking.facilityId}/courts` : null
-  )
+  const facility = useApi<Facility>(r.data ? `/facilities/${r.data.booking.facilityId}` : null)
+  const courts = useApi<Court[]>(r.data ? `/facilities/${r.data.booking.facilityId}/courts` : null)
 
   const groupState = r.data?.state
   const bookingState = r.data?.booking.status
 
-  useEffect(() => {
-    if (
-      !groupState ||
-      !bookingState ||
-      !['GROUP_PENDING', 'CONFIRMED'].includes(groupState) ||
-      ['COMPLETED', 'CANCELLED', 'EXPIRED'].includes(bookingState)
-    )
-      return
-    const timer = setInterval(r.reload, 5000)
-    return () => clearInterval(timer)
-  }, [groupState, bookingState, r.reload])
+  usePolling(() => r.reload(), {
+    enabled: Boolean(
+      groupState &&
+      bookingState &&
+      ['GROUP_PENDING', 'CONFIRMED'].includes(groupState) &&
+      !['COMPLETED', 'CANCELLED', 'EXPIRED'].includes(bookingState) &&
+      !r.error,
+    ),
+    scope: id,
+    interval: 5000,
+    deadline: r.data ? Date.parse(r.data.booking.endsAt) : undefined,
+  })
 
   function showToast(msg: string) {
     setToastMessage(msg)
@@ -87,9 +81,7 @@ function Loaded({ id }: { id: string }) {
       })
       if (p.status === 'FAILED' || p.status === 'EXPIRED') {
         paymentKeys.delete(memberId)
-        throw new Error(
-          'Giao dịch trước đã kết thúc. Bấm thanh toán để tạo giao dịch mới.'
-        )
+        throw new Error('Giao dịch trước đã kết thúc. Bấm thanh toán để tạo giao dịch mới.')
       }
       router.push(`/customer/payments/${p.id}`)
     } catch (err) {
@@ -102,9 +94,7 @@ function Loaded({ id }: { id: string }) {
   async function act(action: 'leave' | 'cancel') {
     if (
       !window.confirm(
-        action === 'leave'
-          ? 'Rời nhóm và yêu cầu chia lại chi phí?'
-          : 'Hủy nhóm đặt sân này?'
+        action === 'leave' ? 'Rời nhóm và yêu cầu chia lại chi phí?' : 'Hủy nhóm đặt sân này?',
       )
     )
       return
@@ -142,7 +132,11 @@ function Loaded({ id }: { id: string }) {
   }
 
   if (r.loading && !r.data)
-    return <p className="p-8" role="status">Đang tải nhóm…</p>
+    return (
+      <p className="p-8" role="status">
+        Đang tải nhóm…
+      </p>
+    )
   if (!r.data)
     return (
       <p className="p-8 text-red-700" role="alert">
@@ -157,9 +151,7 @@ function Loaded({ id }: { id: string }) {
   const owner = user?.id === g.ownerId
   const pending = g.state === 'GROUP_PENDING'
   const total = g.booking.amount
-  const locked = g.members.some(
-    (m) => m.amountPaid > 0 || Boolean(m.paymentRequestedAt)
-  )
+  const locked = g.members.some((m) => m.amountPaid > 0 || Boolean(m.paymentRequestedAt))
 
   return (
     <div className="mx-auto max-w-4xl px-4 sm:px-6 py-8 sm:py-10">
@@ -206,9 +198,7 @@ function Loaded({ id }: { id: string }) {
       {/* Header with Title and Actions */}
       <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-black text-slate-900">
-            {g.name}
-          </h1>
+          <h1 className="text-2xl sm:text-3xl font-black text-slate-900">{g.name}</h1>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
@@ -283,29 +273,10 @@ function Loaded({ id }: { id: string }) {
       </section>
 
       {/* Owner Pending Actions */}
-      {owner && pending && (
-        <nav aria-label="Quản lý nhóm" className="mt-6 flex flex-wrap gap-3">
-          {!g.allocationsLocked && (
-            <Link
-              href={`/customer/groups/${id}/invite`}
-              className="rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold hover:bg-slate-50"
-            >
-              Mời thành viên
-            </Link>
-          )}
-          {!locked && (
-            <Link
-              href={`/customer/groups/${id}/split`}
-              className="rounded-full bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 shadow-xs"
-            >
-              {g.allocationsLocked ? 'Điều chỉnh phân chia' : 'Phân chia chi phí'}
-            </Link>
-          )}
-        </nav>
+      {owner && pending && !locked && (
+        <GroupPaymentSetup group={g} reload={r.reload} />
       )}
-
-      {owner && ['PENDING','CONFIRMED'].includes(g.booking.status) && <PolicyCancellationPanel bookingId={id} onSuccess={r.reload}/>}
-      <ParticipantDemoMoney bookingId={id}/>
+      <ParticipantMoney bookingId={id} moneyClass={g.booking.priceSnapshot.moneyClass} />
       {/* Errors */}
       {(error || r.error) && (
         <p
@@ -318,13 +289,7 @@ function Loaded({ id }: { id: string }) {
 
       {/* Payment Tracking */}
       <RefundPolicyNotice policy={g.booking.priceSnapshot.refundPolicy} />
-      <GroupPaymentTracking
-        group={g}
-        userId={user?.id}
-        busy={busy}
-        pay={pay}
-        reload={r.reload}
-      />
+      <GroupPaymentTracking group={g} userId={user?.id} busy={busy} pay={pay} reload={r.reload} />
 
       {/* Member leave button */}
       {!owner && pending && (
@@ -352,8 +317,8 @@ function Loaded({ id }: { id: string }) {
       {g.state === 'GROUP_EXPIRED' && (
         <div className="mt-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-2xl bg-amber-50/90 p-5 border border-amber-200 text-sm text-amber-900">
           <p className="leading-relaxed">
-            Sân đã được giải phóng. Khoản đóng góp đã nhận được lưu để đối soát
-            và xem xét hoàn tiền theo chính sách được duyệt.
+            Sân đã được giải phóng. Khoản đóng góp đã nhận được lưu để đối soát và xem xét hoàn tiền
+            theo chính sách được duyệt.
           </p>
           {!hidden && (
             <Button

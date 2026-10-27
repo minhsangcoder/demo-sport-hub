@@ -20,6 +20,8 @@ final class ReportState {
   final List<Transaction> transactions = new ArrayList<>();
   final FacilityReportWindow window;
   final Instant asOf, cutoff;
+  final String mode;
+  final com.sporthub.booking.web.DemoFacilityReportDtos.PeerReport peer;
 
   ReportState(
       ReportSnapshotReader.Snapshot s,
@@ -31,6 +33,8 @@ final class ReportState {
     this.window = window;
     this.asOf = asOf;
     this.cutoff = cutoff;
+    this.mode = s.mode();
+    this.peer = s.peer();
     s.bookings().forEach(b -> byId.put(b.id(), b));
     s.courtIds().forEach(id -> this.names.putIfAbsent(id, "Sân đã lưu trữ"));
     this.names.forEach((id, name) -> counters.put(id, new Counter()));
@@ -49,7 +53,9 @@ final class ReportState {
         sellerPaid = BigDecimal.ZERO,
         sellerDue = BigDecimal.ZERO,
         refundDue = BigDecimal.ZERO,
-        technicalRefunded = BigDecimal.ZERO;
+        technicalRefunded = BigDecimal.ZERO,
+        bankCollected = BigDecimal.ZERO,
+        unappliedCollected = BigDecimal.ZERO;
 
     Money money() {
       return new Money(
@@ -62,7 +68,9 @@ final class ReportState {
           decimal(sellerPaid),
           decimal(sellerDue),
           decimal(refundDue),
-          decimal(technicalRefunded));
+          decimal(technicalRefunded),
+          decimal(bankCollected),
+          decimal(unappliedCollected));
     }
   }
 

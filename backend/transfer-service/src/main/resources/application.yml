@@ -3,6 +3,10 @@ server:
 spring:
   application:
     name: transfer-service
+  servlet:
+    multipart:
+      max-file-size: 6MB
+      max-request-size: 7MB
   datasource:
     url: ${TRANSFER_DB_URL:jdbc:postgresql://localhost:5432/transfer_db}
     username: ${POSTGRES_USER}

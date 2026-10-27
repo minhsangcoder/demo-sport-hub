@@ -17,7 +17,12 @@ export function PricingHistory({ facility, rule }: { facility: string; rule: str
         {r.data?.map((version) => (
           <li key={version.version}>
             <strong>
-              Phiên bản {version.version}: {money(version.snapshot.pricePerSlot)}
+              Phiên bản {version.version}:{' '}
+              {version.snapshot.pricingUnit === 'HOURLY'
+                ? version.snapshot.pricePerHour == null
+                  ? 'Chưa có giá'
+                  : money(version.snapshot.pricePerHour) + '/giờ'
+                : money(version.snapshot.pricePerSlot) + '/khung lịch cũ'}
             </strong>
             <p className="text-slate-500">
               {new Date(version.recordedAt).toLocaleString('vi-VN')} ·{' '}

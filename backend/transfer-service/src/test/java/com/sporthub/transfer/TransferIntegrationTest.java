@@ -30,7 +30,7 @@ class TransferIntegrationTest {
  @MockBean com.sporthub.common.security.RemoteIdentity identity;
  @MockBean TransferDependencies dependencies;@MockBean Clock clock;@MockBean ReliableOutbox outbox;
  Instant now=Instant.parse("2026-10-05T00:00:00Z"),start=now.plusSeconds(86400);UUID book,facility,court;Caller seller,buyer;JsonNode booking;Map<UUID,com.fasterxml.jackson.databind.node.ObjectNode> remoteLeases;
- Caller customer(){return new Caller(UUID.randomUUID(),"Customer",Set.of("CUSTOMER"),Map.of());}String key(){return UUID.randomUUID().toString();}
+ Caller customer(){return new Caller(UUID.randomUUID(),"Customer",Set.of("CUSTOMER"),Map.of(),"ACTIVE",true,false);}String key(){return UUID.randomUUID().toString();}
  @BeforeEach void setup(){seller=customer();buyer=customer();book=UUID.randomUUID();facility=UUID.randomUUID();court=UUID.randomUUID();remoteLeases=new HashMap<>();when(clock.instant()).thenReturn(now);
   booking=json.valueToTree(Map.of("id",book,"facilityId",facility,"courtId",court,"currentHolderId",seller.id(),"startsAt",start,"endsAt",start.plusSeconds(3600),"paidAt",now,"status","CONFIRMED","amount",150000,"currency","VND"));when(dependencies.booking(any())).thenReturn(json.createObjectNode().put("status","CANCELLED"));when(dependencies.booking(book)).thenReturn(booking);
   when(dependencies.command(any(),any())).thenAnswer(i->remoteCommand(i.getArgument(0),i.getArgument(1)));when(dependencies.receipt(any())).thenAnswer(i->{var p=remoteLeases.get(i.getArgument(0));return p==null?null:p.deepCopy();});

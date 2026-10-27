@@ -1,5 +1,73 @@
-export type TransferPolicy={configured:boolean;enabled:boolean;minLeadSeconds:number}
-export type TransferFinanceTerms={mode?:'DEMO';receiverName?:string;receiverFacilityId?:string;amount:string;feeBps:number;policyVersion:number;quotedFeeAmount:string;quotedSellerNetAmount:string;termsHash:string;refundPolicy:{rateBps:number;version?:number}}
-export type Listing={id:string;facilityId:string;courtId:string;venue:{facilityName:string;courtName:string;sportCategoryId:string;address:string;provinceCode?:string|null;province:string;wardCode?:string|null;ward:string;timezone:string;amenities:string[]};originalAmount:number;price:number;currency:string;startsAt:string;endsAt:string;deadline:string;state:string;own:boolean;available:boolean;version:number;financeTerms?:TransferFinanceTerms|null}
-export type Acquisition={id:string;listingId:string;bookingId:string;buyerId:string;amount:number;currency:string;expiresAt:string;state:string;paymentId:string|null;financeTerms?:TransferFinanceTerms|null}
-export const transferStates:Record<string,string>={ACTIVE:'Đang rao',LOCKED:'Có người đang thanh toán',COMPLETED:'Đã bàn giao',WITHDRAWN:'Đã rút tin',EXPIRED:'Hết hạn',PENDING:'Chờ thanh toán',PENDING_HANDOFF:'Đang bàn giao',SUCCESS:'Đã nhận quyền sử dụng',CANCELLED:'Đã hủy',FAILED:'Giao dịch thất bại',PENDING_AUDIT:'Đang đối soát'}
+export type TransferPolicy = { configured: boolean; enabled: boolean; minLeadSeconds: number }
+export type TransferFinanceTerms = {
+  protocol?: 'PEER_RESALE_V1' | 'LEGACY_OWNER'
+  bankSharingConsent?: 'BUYER_AND_SEPAY_QR_V1'
+  bankDestinationRevisionId?: string
+  sellerId?: string
+  mode?: 'DEMO' | 'REAL'
+  facilityName?: string
+  receiverName?: string
+  receiverFacilityId?: string
+  amount: string
+  feeBps: number
+  policyVersion: number
+  quotedFeeAmount: string
+  quotedSellerNetAmount: string
+  termsHash: string
+  refundPolicy: { rateBps: number; version?: number }
+}
+export type Listing = {
+  id: string
+  facilityId: string
+  courtId: string
+  venue: {
+    facilityName: string
+    courtName: string
+    sportCategoryId: string
+    address: string
+    provinceCode?: string | null
+    province: string
+    wardCode?: string | null
+    ward: string
+    timezone: string
+    amenities: string[]
+  }
+  originalAmount: number
+  price: number
+  currency: string
+  startsAt: string
+  endsAt: string
+  deadline: string
+  state: string
+  own: boolean
+  available: boolean
+  version: number
+  financeTerms?: TransferFinanceTerms | null
+}
+export type Acquisition = {
+  protocol?: string
+  conversationId?: string
+  id: string
+  listingId: string
+  bookingId: string
+  buyerId: string
+  amount: number
+  currency: string
+  expiresAt: string
+  state: string
+  paymentId: string | null
+  financeTerms?: TransferFinanceTerms | null
+}
+export const transferStates: Record<string, string> = {
+  ACTIVE: 'Đang rao',
+  LOCKED: 'Có người đang thanh toán',
+  COMPLETED: 'Đã bàn giao',
+  WITHDRAWN: 'Đã rút tin',
+  EXPIRED: 'Hết hạn',
+  PENDING: 'Chờ thanh toán',
+  PENDING_HANDOFF: 'Đang bàn giao',
+  SUCCESS: 'Đã nhận quyền sử dụng',
+  CANCELLED: 'Đã hủy',
+  FAILED: 'Giao dịch thất bại',
+  PENDING_AUDIT: 'Đang đối soát',
+}

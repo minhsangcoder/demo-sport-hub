@@ -12,6 +12,18 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.*;
 
 class RemoteIdentityTest {
+    @Test void verifiedContactComesFromLiveIdentityRatherThanClientHeaders() {
+        for(boolean verified : java.util.List.of(false,true)) {
+            var builder=RestClient.builder().baseUrl("http://identity.test");
+            var server=MockRestServiceServer.bindTo(builder).build();
+            server.expect(anything()).andRespond(withSuccess("{\"data\":{\"id\":\""+java.util.UUID.randomUUID()+"\",\"fullName\":\"User\",\"roles\":[\"CUSTOMER\"],\"facilityBindings\":[],\"status\":\"ACTIVE\",\"emailVerified\":"+verified+",\"phoneVerified\":false}}",MediaType.APPLICATION_JSON));
+            var request=bearer();request.addHeader("X-User-Email-Verified","true");request.addHeader("X-User-Status","ACTIVE");
+            var caller=new RemoteIdentity(builder.build()).current(request);
+            if(verified) assertThatCode(caller::requireActiveVerified).doesNotThrowAnyException();
+            else assertThatThrownBy(caller::requireActiveVerified).isInstanceOf(com.sporthub.common.exception.ActionPolicyException.class);
+            server.verify();
+        }
+    }
     @Test void ignoresSpoofedHeadersAndRequiresBearerCredentials() {
         var identity = new RemoteIdentity(RestClient.create("http://identity.test"));
         var request = new MockHttpServletRequest();

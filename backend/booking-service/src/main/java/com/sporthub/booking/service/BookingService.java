@@ -18,6 +18,7 @@ public class BookingService {
   private final BookingReads reads;
   private final BookingUsage usage;
   private final BookingAvailabilityService availability;
+  private final HoldProtection protection;
 
   @org.springframework.beans.factory.annotation.Autowired
   public BookingService(
@@ -25,16 +26,21 @@ public class BookingService {
       BookingCreation creation,
       BookingReads reads,
       BookingUsage usage,
-      BookingAvailabilityService availability) {
+      BookingAvailabilityService availability,
+      HoldProtection protection) {
     this.holds = holds;
     this.creation = creation;
     this.reads = reads;
     this.usage = usage;
     this.availability = availability;
+    this.protection = protection;
   }
 
-  @Transactional
+  @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
   public Hold hold(HoldInput input, String key, Caller caller, String token, boolean counter) {
+    var replay = holds.replayHold(input, key, caller, token, counter);
+    if (replay != null) return replay;
+    if (!counter) protection.prepare(caller.id());
     return holds.hold(input, key, caller, token, counter);
   }
 

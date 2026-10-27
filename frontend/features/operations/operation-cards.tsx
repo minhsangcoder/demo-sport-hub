@@ -1,7 +1,7 @@
 'use client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { PolicyCancellationPanel } from '@/features/booking/demo-finance'
+import { PolicyCancellationPanel } from '@/features/booking/finance-panels'
 import { canPayBooking } from '@/features/booking/ownership'
 import { statusLabels } from '@/features/booking/types'
 import { QrUploadButton } from '@/features/operations/qr-checkin'
@@ -130,8 +130,13 @@ export function OperationCards({
                   </Button>
                 </form>
               )}
-              {b.status === 'CONFIRMED' && can('BOOKING_REFUND') && (
-                <PolicyCancellationPanel bookingId={b.id} onSuccess={bookings.reload} />
+              {b.status === 'CONFIRMED' && b.customerId === b.currentHolderId && can('BOOKING_REFUND') && (
+                <PolicyCancellationPanel
+                  bookingId={b.id}
+                  moneyClass={b.priceSnapshot.moneyClass}
+                  guestBookingId={b.currentHolderId === null ? b.id : undefined}
+                  onSuccess={bookings.reload}
+                />
               )}
               {b.status === 'PENDING' && canPay && (
                 <Button

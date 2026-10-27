@@ -14,6 +14,20 @@ export function ReportObligations({
         ['Còn phải hoàn khách', amount(money.refundDue)],
         ['Đã trả người bán trong kỳ', amount(money.sellerPaid)],
         ['Tiền mua lại đã thu trong kỳ', amount(money.transferCollected)],
+        ...(report.mode === 'REAL'
+          ? [
+              [
+                'Ngân hàng đã nhận trong kỳ',
+                money.bankCollected === undefined ? 'Chưa có dữ liệu' : amount(money.bankCollected),
+              ],
+              [
+                'Phần thu chưa áp dụng tại mốc chốt',
+                money.unappliedCollected === undefined
+                  ? 'Chưa có dữ liệu'
+                  : amount(money.unappliedCollected),
+              ],
+            ]
+          : []),
       ].map(([label, value]) => (
         <div key={label}>
           <p className="text-sm text-slate-600">{label}</p>
@@ -22,8 +36,8 @@ export function ReportObligations({
       ))}
       <p className="text-xs text-slate-500 sm:col-span-2 xl:col-span-4">
         Công nợ đến {timestamp(report.obligationCutoff)}, gồm khoản từ kỳ trước. Tiền mua lại và
-        khoản trả người bán là dòng tiền/nghĩa vụ riêng, không cộng thêm vào doanh thu. Hoàn do bàn
-        giao thất bại trong kỳ: {amount(money.technicalRefunded)}.
+        khoản trả người bán là dòng tiền/nghĩa vụ riêng, không cộng thêm vào doanh thu. Hoàn kỹ
+        thuật trong kỳ: {amount(money.technicalRefunded)}.
       </p>
     </div>
   )

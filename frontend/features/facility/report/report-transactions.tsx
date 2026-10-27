@@ -38,7 +38,9 @@ export function ReportTransactions({
                   {reportKindLabels[item.kind] || 'Giao dịch cơ sở'}
                   {!item.cashflow && (
                     <span className="mt-1 block text-xs text-slate-500">
-                      Ghi nhận phí, không thu thêm
+                      {item.kind === 'FACILITY_TRANSFER_FEE'
+                        ? 'Ghi nhận phí, không thu thêm'
+                        : 'Ghi nhận áp dụng, không ghi thêm tiền ngân hàng'}
                     </span>
                   )}
                 </td>
@@ -53,14 +55,22 @@ export function ReportTransactions({
                   {demoVnd(item.amount)}
                 </td>
                 <td className="p-3">
-                  <span className={item.state === 'SUCCESS' ? 'text-emerald-700' : 'text-red-700'}>
-                    {item.state === 'SUCCESS' ? 'Thành công mô phỏng' : 'Thất bại mô phỏng'}
+                  <span className={item.countsTowardTotals ? 'text-emerald-700' : 'text-red-700'}>
+                    {report.mode === 'REAL'
+                      ? item.confirmationMethod === 'MANUALLY_RECORDED'
+                        ? 'Cơ sở xác nhận đã chuyển'
+                        : item.confirmationMethod === 'HANDOFF_COMMITTED'
+                          ? 'Bàn giao đã hoàn tất'
+                          : 'Chứng từ ngân hàng đã xác thực'
+                      : item.state === 'SUCCESS'
+                        ? 'Thành công mô phỏng'
+                        : 'Thất bại mô phỏng'}
                   </span>
                 </td>
                 <td className="p-3">
                   <Link
                     className="text-emerald-700 underline"
-                    href={`/customer/bookings/${item.bookingId}`}
+                    href={`/owner/bookings/${item.bookingId}`}
                   >
                     Xem lượt đặt
                   </Link>

@@ -21,7 +21,13 @@ export function PricingRules({
         >
           <div>
             <h3 className="font-bold">
-              {r.label} · {money(r.pricePerSlot)}
+              {r.label} ·{' '}
+              {r.pricingUnit === 'HOURLY'
+                ? r.pricePerHour == null
+                  ? 'Chưa có giá'
+                  : money(r.pricePerHour)
+                : money(r.pricePerSlot)}
+              {r.pricingUnit === 'HOURLY' ? '/giờ' : '/khung lịch cũ'}
             </h3>
             <p className="mt-2 text-sm text-slate-500">
               {r.courtId ? courts.data?.find((c) => c.id === r.courtId)?.name : 'Toàn cơ sở'} ·{' '}

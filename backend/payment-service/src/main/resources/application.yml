@@ -33,6 +33,6 @@ sporthub:
       enabled: true
   payment:
     demo:
-      callback-secret: ${DEMO_PAYMENT_CALLBACK_SECRET}
+      callback-secret: ${DEMO_PAYMENT_CALLBACK_SECRET:}
 management:
   endpoints.web.exposure.include: health,info

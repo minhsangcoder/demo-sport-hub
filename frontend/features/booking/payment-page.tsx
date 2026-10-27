@@ -18,6 +18,7 @@ import { RefundPolicyNotice } from './refund-policy-notice'
 import { notifyDemoMoneyChanged } from './demo-finance'
 import { TransferFinanceNotice } from '@/features/transfers/finance-notice'
 import type { Acquisition } from '@/features/transfers/types'
+import { BankPaymentInstructions } from '@/features/payments/bank-payment-instructions'
 export function PaymentPage({ id }: { id: string }) {
   return (
     <RequireAuth>
@@ -110,7 +111,7 @@ function Loaded({ id }: { id: string }) {
       setBusy(false)
     }
   }
-  if (resource.loading)
+  if (resource.loading && !resource.data)
     return (
       <p role="status" className="p-8">
         Đang tải giao dịch…
@@ -129,6 +130,24 @@ function Loaded({ id }: { id: string }) {
     user,
     owned.data?.map((f) => f.id),
   )
+  if (p.provider === 'PAYOS')
+    return (
+      <div className="mx-auto max-w-xl space-y-5 px-5 py-10">
+        <h1 className="text-3xl font-black">Thanh toán lượt đặt</h1>
+        <BankPaymentInstructions payment={p} resultHref={resultPath} />
+        {bookingResource.data && (
+          <RefundPolicyNotice policy={bookingResource.data.booking.priceSnapshot.refundPolicy} />
+        )}
+        {acquisitionResource.data?.financeTerms && (
+          <TransferFinanceNotice terms={acquisitionResource.data.financeTerms} />
+        )}
+        {resultPath && (
+          <Link href={resultPath} className="text-emerald-700 underline">
+            Quay lại lượt đặt
+          </Link>
+        )}
+      </div>
+    )
   return (
     <div className="mx-auto max-w-xl px-5 py-10">
       <p className="text-sm font-bold text-amber-700">MÔI TRƯỜNG THANH TOÁN MÔ PHỎNG</p>

@@ -9,6 +9,7 @@ import { useState } from 'react'
 import { AdminNav } from './admin-nav'
 import { CollectionsReport } from './collections-report'
 import { AdminDemoMoneyMonitor } from './demo-money-monitor'
+import { AdminRealMoneyMonitor } from './real-money-monitor'
 type BookingStats = {
   from: string
   to: string
@@ -48,7 +49,7 @@ function Loaded() {
   const error = users.error || bookings.error || payments.error
   return (
     <div className="mx-auto max-w-6xl px-5 py-10">
-      <h1 className="text-3xl font-black">Giám sát hệ thống mô phỏng</h1>
+      <h1 className="text-3xl font-black">Giám sát hoạt động hệ thống</h1>
       <AdminNav active="reports" />
       <form
         onSubmit={(e) => {
@@ -161,6 +162,7 @@ function Loaded() {
         </p>
       </section>
       <AdminDemoMoneyMonitor query={query} />
+      <AdminRealMoneyMonitor query={query} />
       <CollectionsReport />
     </div>
   )

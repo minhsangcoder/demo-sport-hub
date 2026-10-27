@@ -20,6 +20,7 @@ public class ScheduleReads {
   private final FacilityClient facilities;
   private final ScheduleAccess access;
   private final PricingEngine pricing = new PricingEngine();
+  private final FlexiblePricingEngine flexible = new FlexiblePricingEngine();
 
   public ScheduleReads(ScheduleRepository repo, FacilityClient facilities, ScheduleAccess access) {
     this.repo = repo;
@@ -63,6 +64,10 @@ public class ScheduleReads {
     LocalDate day = input.startsAt().atZone(context.timezone()).toLocalDate();
     if (!input.endsAt().minusNanos(1).atZone(context.timezone()).toLocalDate().equals(day))
       throw new IllegalArgumentException("Choose slots within one local date");
+    var policy = repo.bookingPolicy(context.facilityId());
+    if (policy.enabled())
+      return flexible.quote(context, calendar(context.facilityId(), context.courtId(), day),
+          repo.rules(context.facilityId()), policy, input);
     var segments =
         preview(context, day).slots().stream()
             .filter(
@@ -91,13 +96,16 @@ public class ScheduleReads {
   }
 
   public CalendarDay calendar(UUID facility, UUID court, LocalDate day) {
-    var hours = repo.hours(facility);
+    return calendar(court, day, repo.hours(facility), repo.exceptions(facility));
+  }
+
+  public CalendarDay calendar(UUID court, LocalDate day, List<Hours> hours, List<ExceptionView> exceptionRows) {
     var overrides = hours.stream().filter(h -> court != null && court.equals(h.courtId())).toList();
     var base =
         overrides.isEmpty() ? hours.stream().filter(h -> h.courtId() == null).toList() : overrides;
     var daily = base.stream().filter(h -> h.dayOfWeek() == day.getDayOfWeek().getValue()).toList();
     var allExceptions =
-        repo.exceptions(facility).stream()
+        exceptionRows.stream()
             .filter(e -> e.date().equals(day) && (e.courtId() == null || e.courtId().equals(court)))
             .toList();
     var courtExceptions =
@@ -130,6 +138,17 @@ public class ScheduleReads {
   }
 
   public Preview preview(FacilityClient.Context context, LocalDate day, List<PriceRule> rules) {
+    var policy = repo.bookingPolicy(context.facilityId());
+    if (policy.enabled()) return hourlyPreview(context, day, rules, policy);
+    return legacyPreview(context, day, rules);
+  }
+
+  public Preview hourlyPreview(FacilityClient.Context context, LocalDate day, List<PriceRule> rules, BookingPolicy policy) {
+    return flexible.preview(context, day, calendar(context.facilityId(), context.courtId(), day), rules, policy);
+  }
+
+  public Preview legacyPreview(FacilityClient.Context context, LocalDate day, List<PriceRule> suppliedRules) {
+    var rules = suppliedRules.stream().filter(r -> "LEGACY_SLOT".equals(r.pricingUnit())).toList();
     var facility = context.facilityId();
     var court = context.courtId();
     var calendar = calendar(facility, court, day);

@@ -26,6 +26,7 @@ public class TransferSettlementService {
         this.repo=repo;this.ledger=ledger;this.booking=booking;this.json=json;this.transactions=new TransactionTemplate(manager);
     }
     public void completed(JsonNode event){
+        if(PeerResaleContract.isPeer(event.path("payload"))||PeerResaleContract.isPeer(event.path("payload").path("transferTerms")))return;
         require(event.path("eventType").asText().equals("transfer.handoff.completed")&&event.path("eventVersion").asInt()==1&&event.path("producer").asText().equals("transfer-service"),"Unsupported handoff envelope");
         JsonNode payload=event.path("payload");UUID eventId=id(event,"eventId"),paymentId=id(payload,"paymentId"),acquisition=id(payload,"acquisitionId");
         require(acquisition.toString().equals(event.path("aggregateId").asText()),"Handoff aggregate differs");

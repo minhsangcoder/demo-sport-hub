@@ -11,7 +11,8 @@ const phase = process.argv[2]
 assert.match(phase ?? '', /^(before|after|candidate(?:-[a-z0-9-]+)?)$/, 'Use before|after|candidate[-name]')
 const require = createRequire(import.meta.url)
 const { chromium } = require(process.env.SPORTHUB_E2E_PLAYWRIGHT || 'playwright')
-const directory = path.join(root, 'tmp/loading-performance', phase)
+const performanceHome = path.resolve(root, process.env.SPORTHUB_PERFORMANCE_HOME || 'tmp/loading-performance')
+const directory = path.join(performanceHome, phase)
 const routes = [
   { name: 'home', path: '/', role: 'PUBLIC', ready: 'text=Sân đo 1' },
   { name: 'login', path: '/login', role: 'PUBLIC', ready: 'input[name=identifier]' },
@@ -26,7 +27,7 @@ const selected = process.argv.find(value => value.startsWith('--routes='))?.slic
 assert.ok(selected.every(name => routes.some(route => route.name === name)), 'Unknown measurement route')
 const fixtureDay = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' })
 if (phase !== 'before') {
-  const baseline = JSON.parse(readFileSync(path.join(root, 'tmp/loading-performance/before/browser.json'), 'utf8'))
+  const baseline = JSON.parse(readFileSync(path.join(performanceHome, 'before/browser.json'), 'utf8'))
   if (baseline.conditions.fixtureDay !== fixtureDay) throw new Error('Re-run the preserved before snapshot on the same calendar day before comparing phases')
 }
 const server = spawn(process.execPath, [path.join(root, 'scripts/performance/ui-server.mjs'), path.join(directory, 'frontend')], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, NODE_ENV: 'production' } })

@@ -48,7 +48,7 @@ test('report filters validate ranges, reset pagination and use server totals ind
   const driver = hookDriver(), paths = [], listeners = new Map(), reloads = []
   const money = { courtCollected: '120000', transferFees: '5000', operatingRevenue: '125000', policyRefunded: '80000', afterRefund: '45000', transferCollected: '100000', sellerPaid: '0', sellerDue: '95000', refundDue: '0', technicalRefunded: '0' }
   let availability = 'PARTIAL', failure = ''
-  const report = () => ({ moneyAvailability: availability, summary: { bookingCount: 1, fullyPaidBookingCount: 1, cancelledCount: 1, money }, transactions: { items: [], total: 0 } })
+  const report = () => ({ mode: 'DEMO', moneyAvailability: availability, summary: { bookingCount: 1, fullyPaidBookingCount: 1, cancelledCount: 1, money }, transactions: { items: [], total: 0 } })
   const load = moduleLoader({ window: { addEventListener: (type, action) => listeners.set(type, action), removeEventListener: type => listeners.delete(type) } }, {
     ...ui, react: driver.react,
     '@/features/facility/facility-store': { useFacility: () => ({ facility: { id: 'A', timezone: 'Asia/Ho_Chi_Minh' } }) },
@@ -56,7 +56,7 @@ test('report filters validate ranges, reset pagination and use server totals ind
   })
   const hook = load('features/facility/report/use-facility-report.ts').useFacilityReport
   let model = driver.render(hook); const initial = model.range
-  model.setPage(3); model = driver.render(hook); assert.match(paths.at(-1), /page=3&size=25$/)
+  model.setPage(3); model = driver.render(hook); assert.match(paths.at(-1), /page=3&size=25&peerPage=0$/)
   model.apply({ fromDate: '2026-10-23', toDate: '2026-10-22' }); model = driver.render(hook)
   assert.ok(model.error); assert.deepEqual(model.range, initial)
   model.apply({ fromDate: '2026-10-20', toDate: '2026-10-23' }); model = driver.render(hook)
@@ -72,4 +72,35 @@ test('report filters validate ranges, reset pagination and use server totals ind
   assert.doesNotMatch(renderToStaticMarkup(kpis({ model })), /125\.000/)
   failure = 'Không thể tải báo cáo.'; assert.equal(driver.render(hook).report, null)
   driver.unmount(); assert.equal(listeners.size, 0)
+})
+
+test('report loads its server-selected REAL mode directly and keeps explicit DEMO selection separate', () => {
+  const driver = hookDriver(), paths = []
+  let loading = true, data
+  const load = moduleLoader({ window: { addEventListener() {}, removeEventListener() {} } }, {
+    ...ui, react: driver.react,
+    '@/features/facility/facility-store': { useFacility: () => ({ facility: { id: 'A', timezone: 'Asia/Ho_Chi_Minh' } }) },
+    '@/lib/use-api': { useApi: path => { paths.push(path); return { data, loading, error: '', reload() {} } } },
+  })
+  const hook = load('features/facility/report/use-facility-report.ts').useFacilityReport
+  let model = driver.render(hook)
+  assert.match(paths.at(-1), /^\/bookings\/reports\/facility\/A\/dashboard\?/)
+  assert.doesNotMatch(paths.at(-1), /[?&]mode=/)
+  assert.equal(model.mode, undefined)
+  assert.equal(model.report, null)
+  const filters = load('features/facility/report/report-filters.tsx').ReportFilters
+  const pending = renderToStaticMarkup(filters({ model }))
+  assert.match(pending, /Chọn nguồn tiền/)
+  assert.doesNotMatch(pending, /<select[^>]*disabled/)
+  data = { mode: 'REAL', moneyAvailability: 'COMPLETE' }; loading = false
+  model = driver.render(hook); assert.equal(model.mode, 'REAL')
+  model.setPage(3); model.setPeerPage(2); model = driver.render(hook)
+  assert.match(paths.at(-1), /page=3&size=25&peerPage=2$/)
+  model.setMode('DEMO'); loading = true; model = driver.render(hook)
+  assert.match(paths.at(-1), /page=0&size=25&mode=DEMO&peerPage=0$/)
+  assert.equal(model.mode, 'DEMO'); assert.equal(model.report, null)
+  data = { mode: 'DEMO', moneyAvailability: 'PARTIAL' }; loading = false
+  model = driver.render(hook); assert.equal(model.report.mode, 'DEMO')
+  assert.ok(paths.every(path => path.startsWith('/bookings/reports/')))
+  driver.unmount()
 })

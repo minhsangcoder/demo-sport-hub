@@ -9,16 +9,16 @@ import org.springframework.stereotype.Service;
 
 @Service
 class DiscoveryResultMapper {
-  private final BookingService bookings;
+  private final BookingAvailabilityService availability;
   private final Clock clock;
   private final int advanceDays;
 
   DiscoveryResultMapper(
-      BookingService bookings,
+      BookingAvailabilityService availability,
       Clock clock,
       @org.springframework.beans.factory.annotation.Value("${booking.advance-days:90}")
           int advanceDays) {
-    this.bookings = bookings;
+    this.availability = availability;
     this.clock = clock;
     this.advanceDays = advanceDays;
   }
@@ -27,18 +27,29 @@ class DiscoveryResultMapper {
 
   Outcome group(DiscoveryPlanner.Group group, DiscoveryQuery query) {
     var rows = new ArrayList<Result>();
+    if (group.candidates().isEmpty()) return new Outcome(rows, group.error());
+    var dates = new LinkedHashMap<UUID, LocalDate>();
+    for (var candidate : group.candidates()) dates.put(candidate.courtId(), candidate.playDay());
+    BookingAvailabilityService.Batch batch;
+    try {
+      batch = availability.discovery(group.candidates().getFirst().facility().id(), dates);
+    } catch (RuntimeException error) {
+      return new Outcome(rows, error);
+    }
     for (var c : group.candidates()) {
+      var preview = batch.previews().get(c.courtId());
+      if (preview == null) break;
       try {
-        var row = match(c, query);
+        var row = match(c, query, preview);
         if (row != null) rows.add(row);
       } catch (RuntimeException error) {
         return new Outcome(rows, error);
       }
     }
-    return new Outcome(rows, group.error());
+    return new Outcome(rows, batch.error() == null ? group.error() : batch.error());
   }
 
-  private Result match(DiscoveryPlanner.Candidate c, DiscoveryQuery query) {
+  private Result match(DiscoveryPlanner.Candidate c, DiscoveryQuery query, JsonNode preview) {
     var input = query.input();
     var after = query.after();
     var before = query.before();
@@ -49,7 +60,6 @@ class DiscoveryResultMapper {
     var playDay = c.playDay();
     var distance = c.distance();
     var names = Map.of(category, c.sportName());
-    var preview = bookings.availability(courtId, playDay.toString());
     var slots = new ArrayList<JsonNode>();
     var zone = ZoneId.of(summary.timezone());
     for (var slot : preview.path("slots")) {

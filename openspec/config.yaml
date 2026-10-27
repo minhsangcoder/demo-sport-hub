@@ -1,0 +1,31 @@
+schema: spec-driven
+
+context: |
+  Before planning or implementing SportHub changes, read openspec/CURRENT_CHANGE.md
+  and root AGENTS.md. The pointer selects the only authoritative proposal.
+  Use that proposal and its own design/specs/tasks only. Do not merge requirements
+  from older changes, archived proposals, older main specs or prior chat memory.
+  Latest explicit user instructions override artifacts. Current code/tests are
+  evidence, not authority to restore superseded business rules.
+  Completed current tasks never authorize switching to an older unfinished change.
+
+rules:
+  proposal:
+    - When a new proposal is written, update openspec/CURRENT_CHANGE.md and mark previous change artifacts HISTORY ONLY before handoff.
+    - Define this proposal from the current user request and source inspection; do not inherit requirements from older proposals.
+  design:
+    - Derive the design only from the selected proposal and latest user decisions; explicitly scope any required legacy behavior.
+  specs:
+    - Do not import requirements from other changes; resolve contradictions against the selected proposal and latest user decisions.
+  tasks:
+    - Tasks implement only this proposal; do not append unfinished tasks from historical changes.
+
+operations:
+  apply:
+    guidance:
+      - Read openspec/CURRENT_CHANGE.md and announce its selected change; never select by lastModified or incomplete task counts.
+      - Apply only the selected change. If complete, do not continue any historical change.
+  archive:
+    guidance:
+      - Archive only when requested. Never merge older deltas into the current requirements.
+      - If archiving the current change, update its path in openspec/CURRENT_CHANGE.md without reactivating an older change.

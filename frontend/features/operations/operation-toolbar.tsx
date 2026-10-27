@@ -14,6 +14,14 @@ export function OperationToolbar({
   const { can, setQuickQrOpen, owner, facilityId } = model
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {!owner && facilityId && can('BOOKING_CHECK_IN') && (
+        <Link
+          href={`/staff/peer-presence?facilityId=${facilityId}`}
+          className="rounded-full border px-4 py-2 text-sm text-emerald-700"
+        >
+          Ghi nhận có mặt khi tranh chấp
+        </Link>
+      )}
       {can('BOOKING_CHECK_IN') && (
         <Button
           type="button"

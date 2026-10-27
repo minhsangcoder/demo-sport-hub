@@ -21,6 +21,7 @@ public class BookingReads {
   private final Clock clock;
   private final CheckinQr qr;
   private final BookingLifecycle lifecycle;
+  private final LocalAppliedCollections collections;
 
   public BookingReads(
       BookingRepository repo,
@@ -28,18 +29,21 @@ public class BookingReads {
       @Value("${JWT_SECRET}") String secret,
       Clock clock,
       CheckinQr qr,
-      BookingLifecycle lifecycle) {
+      BookingLifecycle lifecycle,
+      LocalAppliedCollections collections) {
     this.repo = repo;
     this.dependencies = dependencies;
     this.secret = secret;
     this.clock = clock;
     this.qr = qr;
     this.lifecycle = lifecycle;
+    this.collections = collections;
   }
 
   public List<Booking> mine(Caller caller, String token) {
-    return repo.mine(caller.id()).stream()
-        .map(this::projectEffective)
+    var bookings = repo.mine(caller.id()).stream().map(this::projectEffective).toList();
+    var frozen = lockedUsage(bookings);
+    return bookings.stream()
         .filter(
             b -> {
               if (!counterOperator(b, caller)) return true;
@@ -50,7 +54,7 @@ public class BookingReads {
                 return false;
               }
             })
-        .map(b -> personalView(b, caller))
+        .map(b -> personalView(b, caller, frozen.contains(b.id())))
         .toList();
   }
 
@@ -72,12 +76,20 @@ public class BookingReads {
         b.currentHolderId() != null
             && b.currentHolderId().equals(caller.id())
             && caller.hasRole("CUSTOMER");
-    String checkin = b.status().equals("CONFIRMED") && usage ? checkinToken(b) : null;
+    boolean frozen = usageFrozen(b.id());
+    String checkin =
+        b.status().equals("CONFIRMED")
+                && usage
+                && !frozen
+                && (!BookingMoneyCohorts.isReal(b) || collections.fullyPaid(b))
+            ? checkinToken(b)
+            : null;
     return new Detail(
-        personalView(b, caller),
+        personalView(b, caller, frozen),
         repo.history(id),
         checkin,
-        checkin == null ? null : qr.svg(checkin));
+        checkin == null ? null : qr.svg(checkin),
+        PeerHandoffs.consumed(repo, id));
   }
 
   public Booking projectEffective(Booking b) {
@@ -148,6 +160,10 @@ WHERE g.booking_id=? AND g.operator_id=? AND g.linked_customer_id IS NULL
   }
 
   public Booking personalView(Booking b, Caller caller) {
+    return personalView(b, caller, usageFrozen(b.id()));
+  }
+
+  private Booking personalView(Booking b, Caller caller, boolean frozen) {
     boolean historical = historicalHolder(b, caller);
     boolean isCurrentHolder = Objects.equals(b.currentHolderId(), caller.id());
     boolean isCustomer = Objects.equals(b.customerId(), caller.id());
@@ -182,8 +198,28 @@ WHERE g.booking_id=? AND g.operator_id=? AND g.linked_customer_id IS NULL
           b.completedAt(),
           b.version(),
           b.checkinTokenVersion(),
-          oldCreator ? null : b.bookingCode());
-    return b;
+          oldCreator || frozen ? null : b.bookingCode());
+    return frozen ? b.withBookingCode(null) : b;
+  }
+
+  private boolean usageFrozen(UUID booking) {
+    return Boolean.TRUE.equals(
+        repo.jdbc()
+            .queryForObject(
+                "SELECT EXISTS(SELECT 1 FROM transfer_leases WHERE booking_id=? AND"
+                    + " state='LOCKED')",
+                Boolean.class,
+                booking));
+  }
+
+  private Set<UUID> lockedUsage(List<Booking> bookings) {
+    if (bookings.isEmpty()) return Set.of();
+    return Set.copyOf(
+        repo.jdbc()
+            .queryForList(
+                "SELECT booking_id FROM transfer_leases WHERE state='LOCKED' AND booking_id=ANY(?)",
+                UUID.class,
+                (Object) bookings.stream().map(Booking::id).toArray(UUID[]::new)));
   }
 
   public boolean historicalHolder(Booking b, Caller caller) {
@@ -234,14 +270,16 @@ WHERE g.booking_id=? AND g.operator_id=? AND g.linked_customer_id IS NULL
     boolean operator = counterOperator(b, caller);
     if (operator)
       dependencies.facilityPermission(b.facilityId(), caller, token, "BOOKING_CREATE_COUNTER");
+    if (operator && BookingMoneyCohorts.isReal(b))
+      dependencies.facilityPermission(b.facilityId(), caller, token, "BOOKING_PAYMENT_COUNTER");
     if (!operator && !Objects.equals(b.currentHolderId(), caller.id()))
       throw new ForbiddenException("Only the booking payer or original counter operator can pay");
     if (!b.status().equals("PENDING")
         || !b.holdExpiresAt().isAfter(clock.instant())
         || !lifecycle.hasLiveHold(b, clock.instant()))
       throw new ConflictException("Booking is no longer payable");
-    return new Payable(
-        id, caller.id(), b.amount(), b.currency(), b.holdExpiresAt(), "BOOKING", null);
+    return BookingMoneyCohorts.payable(
+        b, caller.id(), b.amount(), b.holdExpiresAt(), "BOOKING", null);
   }
 
   public String checkinToken(Booking b) {

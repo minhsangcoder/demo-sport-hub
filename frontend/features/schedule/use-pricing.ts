@@ -6,6 +6,7 @@ import { api } from '@/lib/api'
 import { type CourtType } from '@/lib/business-api'
 import { useApi } from '@/lib/use-api'
 import { useState } from 'react'
+import { pricingInput } from './pricing-input'
 export function usePricing() {
   const { facility, basePath } = useFacility()
   const rules = useApi<PriceRule[]>(`/schedules/facilities/${facility.id}/pricing`)
@@ -25,27 +26,11 @@ export function usePricing() {
     setError('')
     setMessage('')
     const form = e.currentTarget
-    const v = new FormData(form)
-    const value = (key: string) => String(v.get(key) || '')
     try {
       await api(`/schedules/facilities/${facility.id}/pricing${editing ? '/' + editing.id : ''}`, {
         method: editing ? 'PUT' : 'POST',
         headers: editing ? { 'If-Match': String(editing.version) } : undefined,
-        body: JSON.stringify({
-          courtId: value('courtId') || null,
-          sportCategoryId: value('sportCategoryId') || null,
-          courtTypeId: value('courtTypeId') || null,
-          dayOfWeek: dateMode ? null : Number(value('dayOfWeek')),
-          specificDate: dateMode ? value('specificDate') : null,
-          startsAt: value('startsAt'),
-          endsAt: value('endsAt'),
-          pricePerSlot: Number(value('price')),
-          priority: Number(value('priority')),
-          label: value('label'),
-          effectiveFrom: value('effectiveFrom'),
-          effectiveTo: value('effectiveTo') || null,
-          currency: 'VND',
-        }),
+        body: JSON.stringify(pricingInput(new FormData(form), dateMode)),
       })
       rules.reload()
       form.reset()

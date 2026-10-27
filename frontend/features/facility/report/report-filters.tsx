@@ -9,10 +9,10 @@ export function ReportFilters({
 }: {
   model: Pick<
     ReturnType<typeof useFacilityReport>,
-    'apply' | 'draft' | 'setDraft' | 'facility' | 'range' | 'error'
+    'apply' | 'draft' | 'setDraft' | 'facility' | 'range' | 'error' | 'mode' | 'setMode'
   >
 }) {
-  const { apply, draft, setDraft, facility, range, error } = model
+  const { apply, draft, setDraft, facility, range, error, mode, setMode } = model
   return (
     <form
       onSubmit={(event) => {
@@ -21,6 +21,20 @@ export function ReportFilters({
       }}
       className="flex flex-wrap items-end gap-4 rounded-2xl border bg-white p-5"
     >
+      <label className="grid gap-2 text-sm">
+        Nguồn tiền
+        <select
+          value={mode ?? ''}
+          onChange={(event) => setMode(event.target.value as 'REAL' | 'DEMO')}
+          className="h-10 rounded-lg border px-3"
+        >
+          <option value="" disabled>
+            Chọn nguồn tiền
+          </option>
+          <option value="REAL">Giao dịch ngân hàng thật</option>
+          <option value="DEMO">Lịch sử mô phỏng</option>
+        </select>
+      </label>
       <label className="grid gap-2 text-sm">
         Từ ngày
         <Input

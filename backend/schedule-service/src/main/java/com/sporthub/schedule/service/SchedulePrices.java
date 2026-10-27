@@ -53,8 +53,8 @@ public class SchedulePrices {
     repo.jdbc()
         .update(
             "INSERT INTO"
-                + " pricing_rules(id,facility_id,court_id,sport_category_id,day_of_week,specific_date,start_time,end_time,price_per_slot,priority,label,effective_from,effective_to,currency,created_by,court_type_id)"
-                + " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                + " pricing_rules(id,facility_id,court_id,sport_category_id,day_of_week,specific_date,start_time,end_time,price_per_slot,priority,label,effective_from,effective_to,currency,created_by,court_type_id,pricing_unit,price_per_hour)"
+                + " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             id,
             facility,
             input.courtId(),
@@ -70,7 +70,9 @@ public class SchedulePrices {
             ScheduleValues.date(input.effectiveTo()),
             input.currency(),
             caller.id(),
-            input.courtTypeId());
+            input.courtTypeId(),
+            candidate.pricingUnit(),
+            candidate.pricePerHour());
     recordPriceVersion(candidate, caller.id());
     access.audit(facility, caller, "PRICE_CREATED", candidate);
     return candidate;
@@ -85,25 +87,12 @@ public class SchedulePrices {
       throw new ConflictException("Price version changed; reload the rule before editing");
     if (!previous.active())
       throw new ConflictException("Create a new rule instead of editing a disabled price");
+    if (previous.pricingUnit().equals("HOURLY") && input.pricingUnit() == null)
+      throw new IllegalArgumentException("Cần chọn rõ đơn vị giá khi sửa bảng giá theo giờ.");
     if (pricing.legacy(previous) && input.courtTypeId() == null)
       throw new IllegalArgumentException(
           "Map the legacy court type explicitly before editing this rule");
-    if (!input.courtTypeProvided())
-      input =
-          new PriceInput(
-              input.courtId(),
-              input.sportCategoryId(),
-              input.dayOfWeek(),
-              input.specificDate(),
-              input.startsAt(),
-              input.endsAt(),
-              input.pricePerSlot(),
-              input.priority(),
-              input.label(),
-              input.effectiveFrom(),
-              input.effectiveTo(),
-              input.currency(),
-              previous.courtTypeId());
+    if (!input.courtTypeProvided()) input = input.withCourtType(previous.courtTypeId());
     configuration.begin(facility);
     validation.validatePrice(facility, input, token);
     var candidate = price(facility, id, input, previous.version() + 1);
@@ -114,7 +103,7 @@ public class SchedulePrices {
             .update(
                 "UPDATE pricing_rules SET"
                     + " court_id=?,sport_category_id=?,court_type_id=?,court_type=NULL,day_of_week=?,specific_date=?,start_time=?,end_time=?,price_per_slot=?,priority=?,label=?,effective_from=?,effective_to=?,currency=?,version=version+1,updated_by=?,updated_at=NOW()"
-                    + " WHERE id=? AND facility_id=? AND version=?",
+                    + ",pricing_unit=?,price_per_hour=? WHERE id=? AND facility_id=? AND version=?",
                 input.courtId(),
                 input.sportCategoryId(),
                 input.courtTypeId(),
@@ -129,6 +118,8 @@ public class SchedulePrices {
                 ScheduleValues.date(input.effectiveTo()),
                 input.currency(),
                 caller.id(),
+                candidate.pricingUnit(),
+                candidate.pricePerHour(),
                 id,
                 facility,
                 expectedVersion);
@@ -181,22 +172,7 @@ public class SchedulePrices {
     PriceRule previous =
         draft.replacesRuleId() == null ? null : findPrice(facility, draft.replacesRuleId());
     var input = draft.rule();
-    if (previous != null && !input.courtTypeProvided())
-      input =
-          new PriceInput(
-              input.courtId(),
-              input.sportCategoryId(),
-              input.dayOfWeek(),
-              input.specificDate(),
-              input.startsAt(),
-              input.endsAt(),
-              input.pricePerSlot(),
-              input.priority(),
-              input.label(),
-              input.effectiveFrom(),
-              input.effectiveTo(),
-              input.currency(),
-              previous.courtTypeId());
+    if (previous != null && !input.courtTypeProvided()) input = input.withCourtType(previous.courtTypeId());
     validation.validatePrice(facility, input, readToken);
     var candidate =
         price(
@@ -207,7 +183,9 @@ public class SchedulePrices {
     var rules = new ArrayList<>(repo.rules(facility));
     if (previous != null) rules.removeIf(r -> r.id().equals(previous.id()));
     rules.add(candidate);
-    return reads.preview(context, draft.date(), rules);
+    return input.unit().equals("HOURLY")
+        ? reads.hourlyPreview(context, draft.date(), rules, repo.bookingPolicy(facility))
+        : reads.legacyPreview(context, draft.date(), rules);
   }
 
   public PriceRule findPrice(UUID facility, UUID id) {
@@ -227,7 +205,7 @@ public class SchedulePrices {
         i.specificDate(),
         i.startsAt(),
         i.endsAt(),
-        com.sporthub.common.money.Money.positive(i.pricePerSlot(), i.currency()),
+        com.sporthub.common.money.Money.positive(i.configuredPrice(), i.currency()),
         i.priority(),
         i.label().trim(),
         i.effectiveFrom(),
@@ -236,7 +214,9 @@ public class SchedulePrices {
         true,
         version,
         i.courtTypeId(),
-        null);
+        null,
+        i.unit(),
+        i.pricePerHour());
   }
 
   public com.fasterxml.jackson.databind.JsonNode readPriceSnapshot(String value) {

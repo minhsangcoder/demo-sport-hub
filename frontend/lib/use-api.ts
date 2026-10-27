@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { readRequests } from './read-requests'
+import { ApiError } from './api'
 import { invalidateReads, readSession, readVersion, subscribeReads } from './read-state'
 export function useApi<T>(path: string | null) {
   const version = useSyncExternalStore(
@@ -14,25 +15,31 @@ export function useApi<T>(path: string | null) {
     session: string
     data: T | null
     error: string
+    failure: ApiError | null
   } | null>(null)
   const lifetime = useRef(0)
   const mounted = useRef(false)
   const completed = useRef('')
   const refreshFence = useRef<{ path: string; version: string } | null>(null)
   const leases = useRef(new Set<() => void>())
-  const start = useCallback((url: string, generation: string) => {
+  const start = useCallback((url: string, generation: string, signal?: AbortSignal) => {
+    if (signal?.aborted) return Promise.resolve()
     const session = readSession(url)
     const token = lifetime.current
     const request = readRequests.acquire<T>(url)
     leases.current.add(request.release)
+    signal?.addEventListener('abort', request.release, { once: true })
     const current = () =>
-      mounted.current && token === lifetime.current && generation === readVersion(url)
+      !signal?.aborted &&
+      mounted.current &&
+      token === lifetime.current &&
+      generation === readVersion(url)
     return request.promise
       .then((data) => {
         if (current()) {
           completed.current = `${generation}|${url}`
           refreshFence.current = { path: url, version: generation }
-          setResult({ path: url, version: generation, session, data, error: '' })
+          setResult({ path: url, version: generation, session, data, error: '', failure: null })
         }
       })
       .catch((error) => {
@@ -45,10 +52,12 @@ export function useApi<T>(path: string | null) {
             session,
             data: null,
             error: error instanceof Error ? error.message : 'Không thể tải dữ liệu.',
+            failure: error instanceof ApiError ? error : null,
           })
         }
       })
       .finally(() => {
+        signal?.removeEventListener('abort', request.release)
         request.release()
         leases.current.delete(request.release)
       })
@@ -75,10 +84,20 @@ export function useApi<T>(path: string | null) {
     if (refreshFence.current.version === readVersion(path)) invalidateReads(path)
     return start(path, readVersion(path))
   }, [path, start])
+  const poll = useCallback(
+    (signal: AbortSignal) => {
+      if (!path || !mounted.current || refreshFence.current?.path !== path) return Promise.resolve()
+      // Polling joins an active read without creating an uncancellable subscription refresh.
+      return start(path, readVersion(path), signal)
+    },
+    [path, start],
+  )
   return {
     data: sameSession ? result.data : null,
     error: current ? result.error : '',
     loading: Boolean(path) && !current,
+    failure: current ? result.failure : null,
     reload,
+    poll,
   }
 }

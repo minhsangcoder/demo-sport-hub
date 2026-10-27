@@ -24,6 +24,12 @@ export default function ProfilePage() {
           <div className="mt-8 flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800">
             <nav className="flex space-x-6">
               <Link
+                href="/customer/profile/bank"
+                className="pb-3 text-sm font-medium text-emerald-700"
+              >
+                Ngân hàng
+              </Link>
+              <Link
                 href="/customer/profile"
                 className="border-b-2 border-emerald-600 pb-3 text-sm font-bold text-emerald-600 flex items-center gap-2"
               >

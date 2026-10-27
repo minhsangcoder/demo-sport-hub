@@ -50,7 +50,10 @@ public class SchedulePriceValidation {
   public void validatePrice(UUID facility, PriceInput i, String token) {
     if (!validator.validate(i).isEmpty())
       throw new IllegalArgumentException("Invalid pricing fields");
-    com.sporthub.common.money.Money.positive(i.pricePerSlot(), i.currency());
+    if (i.unit().equals("HOURLY") && (i.pricePerHour() == null || i.pricePerSlot() != null)
+        || i.unit().equals("LEGACY_SLOT") && (i.pricePerSlot() == null || i.pricePerHour() != null))
+      throw new IllegalArgumentException("Chọn đúng một đơn vị giá và nhập số tiền tương ứng.");
+    com.sporthub.common.money.Money.positive(i.configuredPrice(), i.currency());
     ScheduleValues.validateTime(i.startsAt());
     ScheduleValues.validateTime(i.endsAt());
     if (!i.startsAt().isBefore(i.endsAt()))
@@ -162,8 +165,9 @@ public class SchedulePriceValidation {
       if (interval.opensAt().isAfter(cursor)) return false;
       LocalTime end =
           interval.closesAt().isBefore(input.endsAt()) ? interval.closesAt() : input.endsAt();
-      if (Duration.between(interval.opensAt(), cursor).toMinutes() % interval.slotMinutes() != 0
-          || Duration.between(interval.opensAt(), end).toMinutes() % interval.slotMinutes() != 0)
+      if (!input.unit().equals("HOURLY")
+          && (Duration.between(interval.opensAt(), cursor).toMinutes() % interval.slotMinutes() != 0
+          || Duration.between(interval.opensAt(), end).toMinutes() % interval.slotMinutes() != 0))
         return false;
       cursor = end;
       if (cursor.equals(input.endsAt())) return true;

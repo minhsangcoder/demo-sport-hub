@@ -1,0 +1,9 @@
+---
+description: Use only the latest SportHub proposal for OpenSpec and Ponytail work
+alwaysApply: true
+---
+
+Read root `AGENTS.md` and `openspec/CURRENT_CHANGE.md` before work.
+They select the sole current proposal; do not merge older change requirements.
+Keep the shared pointer current when generating a new proposal. Completed tasks
+never authorize falling back to an older change. Latest user instructions win.

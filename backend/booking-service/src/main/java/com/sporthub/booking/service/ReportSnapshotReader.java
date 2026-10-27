@@ -20,7 +20,35 @@ public class ReportSnapshotReader {
       List<Map<String, Object>> settlements,
       List<Map<String, Object>> refunds,
       List<Map<String, Object>> events,
-      List<UUID> courtIds) {}
+      List<UUID> courtIds,
+      String mode,
+      List<com.sporthub.common.money.PaymentProofFacts.BankCredit> bankCredits,
+      List<Map<String, Object>> localCredits,
+      List<String> sourceReasons,
+      com.sporthub.booking.web.DemoFacilityReportDtos.PeerReport peer) {
+    Snapshot(
+        List<Booking> bookings,
+        LocalAppliedCollections.Snapshot applied,
+        List<Map<String, Object>> collections,
+        List<Map<String, Object>> settlements,
+        List<Map<String, Object>> refunds,
+        List<Map<String, Object>> events,
+        List<UUID> courtIds) {
+      this(
+          bookings,
+          applied,
+          collections,
+          settlements,
+          refunds,
+          events,
+          courtIds,
+          "DEMO",
+          List.of(),
+          List.of(),
+          List.of(),
+          com.sporthub.booking.web.DemoFacilityReportDtos.PeerReport.notApplicable());
+    }
+  }
 
   private final BookingRepository repo;
   private final LocalAppliedCollections applied;
@@ -115,6 +143,8 @@ WITH relevant AS (
                   to,
                   facility,
                   extra);
+          bookings =
+              bookings.stream().filter(booking -> !BookingMoneyCohorts.isReal(booking)).toList();
           var selected = uuidArray(bookings.stream().map(Booking::id).toList());
           var collections =
               repo.jdbc()
@@ -134,7 +164,7 @@ WITH relevant AS (
         });
   }
 
-  private static String uuidArray(Collection<UUID> ids) {
-    return "{" + String.join(",", ids.stream().map(UUID::toString).toList()) + "}";
+  private static org.springframework.jdbc.support.SqlArrayValue uuidArray(Collection<UUID> ids) {
+    return BookingRepository.uuidArray(ids);
   }
 }

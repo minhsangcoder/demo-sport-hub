@@ -1,0 +1,5 @@
+{
+  "source": "https://vietqr.app/img?acc=000123456789&bank=970436&amount=80000&des=SH1&template=qronly",
+  "retrievedDate": "2026-10-25",
+  "purpose": "Offline QR decoder regression with synthetic recipient data. No transfer or bank verification."
+}
